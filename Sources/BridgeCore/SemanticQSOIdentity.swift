@@ -35,11 +35,19 @@ public struct SemanticQSOIdentity: Codable, Equatable, Hashable, Sendable {
     }
 
     public var canonicalString: String {
-        [call, timestamp, band, mode, frequency].joined(separator: "\u{001F}")
+        [call, timestamp, band, mode].joined(separator: "\u{001F}")
     }
 
     public var sha256: String {
         SHA256.hash(data: Data(canonicalString.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+
+    public static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.canonicalString == rhs.canonicalString
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(canonicalString)
     }
 
     private static func normalizeCall(_ value: String) -> String {
@@ -66,8 +74,12 @@ public struct SemanticQSOIdentity: Codable, Equatable, Hashable, Sendable {
     }
 
     private static func normalizeFrequency(_ value: String) -> String {
-        value
+        let cleaned = value
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(of: ",", with: ".")
+        guard let decimal = Decimal(string: cleaned, locale: Locale(identifier: "en_US_POSIX")) else {
+            return cleaned
+        }
+        return NSDecimalNumber(decimal: decimal).stringValue
     }
 }

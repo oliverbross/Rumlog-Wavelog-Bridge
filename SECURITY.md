@@ -9,7 +9,8 @@ network services.
 ## Security boundaries
 
 - Wavelog tokens must never be written to logs, captures, fixtures, or Git.
-- Production tokens belong in the macOS Keychain when the app target is added.
+- Production tokens are stored in macOS Keychain and are never written to the
+  JSON settings or sync-state files.
 - Protocol captures may contain personal and station information and are ignored
   by Git by default.
 - Peer listeners default to local/trusted interfaces and must not be publicly

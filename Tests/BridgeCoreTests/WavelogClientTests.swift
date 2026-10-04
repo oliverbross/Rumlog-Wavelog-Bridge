@@ -10,6 +10,8 @@ import Testing
     MockURLProtocol.handler = { request in
         #expect(request.httpMethod == "POST")
         #expect(request.url?.path == "/index.php/api/v2/qso")
+        #expect(request.cachePolicy == .reloadIgnoringLocalCacheData)
+        #expect(request.value(forHTTPHeaderField: "Cache-Control") == "no-cache")
         #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer wl2_test_token")
 
         let body = try requestBody(request)
@@ -53,6 +55,79 @@ import Testing
     #expect(created.id == 42)
     #expect(created.call == "N0TEST")
     #expect(created.frequency == "14050000")
+
+    MockURLProtocol.handler = { request in
+        let body = try requestBody(request)
+        let json = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        #expect(json["station_profile_id"] as? Int == 7)
+        #expect(json["import_type"] as? String == "adif")
+        #expect((json["adif"] as? String)?.contains("<CALL:6>N0TEST") == true)
+        let response = try #require(HTTPURLResponse(
+            url: request.url!,
+            statusCode: 201,
+            httpVersion: nil,
+            headerFields: ["Content-Type": "application/json"]
+        ))
+        return (response, Data("""
+        {"data":{"parsed":1,"imported":1,"skipped":0,"messages":[]},"error":null}
+        """.utf8))
+    }
+    let imported = try await client.importADIF("<EOH><CALL:6>N0TEST<EOR>")
+    #expect(imported.imported == 1)
+
+    MockURLProtocol.handler = { request in
+        #expect(request.httpMethod == "GET")
+        let response = try #require(HTTPURLResponse(
+            url: request.url!,
+            statusCode: 200,
+            httpVersion: nil,
+            headerFields: ["Content-Type": "application/json"]
+        ))
+        return (response, Data("""
+        {"data":{"exported":0,"lastfetchedid":42,"adif":null},"meta":{"page":1,"per_page":500,"count":0,"total":0,"total_pages":0,"has_more":false}}
+        """.utf8))
+    }
+    let empty = try await client.exportADIF(sinceID: 42)
+    #expect(empty.data.exported == 0)
+    #expect(empty.data.adif.isEmpty)
+}
+
+@Test(.enabled(if: ProcessInfo.processInfo.environment["RUN_WAVELOG_DRYRUN"] == "1"))
+func validatesLiveADIFWithoutWriting() async throws {
+    let environment = ProcessInfo.processInfo.environment
+    let token = try #require(environment["WAVELOG_TOKEN"])
+    let baseURL = try #require(URL(string: environment["WAVELOG_URL"] ?? ""))
+    let stationID = try #require(Int(environment["WAVELOG_STATION_ID"] ?? ""))
+    let client = WavelogClient(configuration: try WavelogConfiguration(
+        baseURL: baseURL,
+        token: token,
+        stationID: stationID
+    ))
+    let source = try await client.exportADIF(page: 1, perPage: 1)
+    let result = try await client.validateADIF(source.data.adif)
+    #expect(result.dryrun)
+    #expect(result.parsed == 1)
+}
+
+@Test(.enabled(if: ProcessInfo.processInfo.environment["RUN_WAVELOG_DUPLICATE_WRITE"] == "1"))
+func reconcilesLiveDuplicateADIFWithoutCreatingAnotherQSO() async throws {
+    let environment = ProcessInfo.processInfo.environment
+    let token = try #require(environment["WAVELOG_TOKEN"])
+    let baseURL = try #require(URL(string: environment["WAVELOG_URL"] ?? ""))
+    let stationID = try #require(Int(environment["WAVELOG_STATION_ID"] ?? ""))
+    let client = WavelogClient(configuration: try WavelogConfiguration(
+        baseURL: baseURL,
+        token: token,
+        stationID: stationID
+    ))
+    let before = try await client.exportADIF(page: 1, perPage: 1)
+    let result = try await client.importADIF(before.data.adif)
+    let after = try await client.exportADIF(page: 1, perPage: 1)
+
+    #expect(result.parsed == 1)
+    #expect(result.imported == 0)
+    #expect(result.skipped == 1)
+    #expect(after.meta.total == before.meta.total)
 }
 
 @Test func rejectsInsecureNonLoopbackWavelogURL() {

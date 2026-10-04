@@ -93,6 +93,65 @@ public struct WavelogQSOPage: Codable, Equatable, Sendable {
     public let meta: WavelogListMeta
 }
 
+public struct WavelogStation: Codable, Equatable, Identifiable, Sendable {
+    public let id: Int
+    public let uuid: String?
+    public let name: String
+    public let callsign: String
+    public let gridsquare: String?
+    public let city: String?
+    public let country: String?
+    public let active: Bool
+}
+
+public struct WavelogADIFData: Codable, Equatable, Sendable {
+    public let exported: Int
+    public let lastFetchedID: Int?
+    public let adif: String
+
+    enum CodingKeys: String, CodingKey {
+        case exported, adif
+        case lastFetchedID = "lastfetchedid"
+    }
+
+    public init(exported: Int, lastFetchedID: Int?, adif: String) {
+        self.exported = exported
+        self.lastFetchedID = lastFetchedID
+        self.adif = adif
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        exported = try container.decode(Int.self, forKey: .exported)
+        lastFetchedID = try container.decodeIfPresent(Int.self, forKey: .lastFetchedID)
+        adif = try container.decodeIfPresent(String.self, forKey: .adif) ?? ""
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(exported, forKey: .exported)
+        try container.encodeIfPresent(lastFetchedID, forKey: .lastFetchedID)
+        try container.encode(adif, forKey: .adif)
+    }
+}
+
+public struct WavelogADIFPage: Codable, Equatable, Sendable {
+    public let data: WavelogADIFData
+    public let meta: WavelogListMeta
+}
+
+public struct WavelogImportSummary: Codable, Equatable, Sendable {
+    public let parsed: Int
+    public let imported: Int
+    public let skipped: Int
+    public let messages: [String]
+}
+
+public struct WavelogADIFValidation: Codable, Equatable, Sendable {
+    public let dryrun: Bool
+    public let parsed: Int
+}
+
 public struct WavelogQSOCreate: Codable, Equatable, Sendable {
     public let call: String
     public let band: String
@@ -203,6 +262,19 @@ private struct WavelogCreateBody: Encodable {
     }
 }
 
+private struct WavelogADIFImportBody: Encodable {
+    let stationProfileID: Int
+    let importType = "adif"
+    let adif: String
+    let dryrun: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case adif, dryrun
+        case stationProfileID = "station_profile_id"
+        case importType = "import_type"
+    }
+}
+
 public actor WavelogClient {
     private let configuration: WavelogConfiguration
     private let session: URLSession
@@ -223,27 +295,68 @@ public actor WavelogClient {
         if let sinceID {
             items.append(URLQueryItem(name: "since_id", value: String(sinceID)))
         }
-        let request = try makeRequest(method: "GET", qsoID: nil, queryItems: items, body: nil)
+        let request = try makeRequest(method: "GET", resourceID: nil, queryItems: items, body: nil)
         let (data, response) = try await session.data(for: request)
         return try decodeDirect(WavelogQSOPage.self, data: data, response: response)
     }
 
+    public func listStations() async throws -> [WavelogStation] {
+        let request = try makeRequest(method: "GET", resource: "station", resourceID: nil, queryItems: [], body: nil)
+        let (data, response) = try await session.data(for: request)
+        return try decodeEnvelope([WavelogStation].self, data: data, response: response)
+    }
+
+    public func exportADIF(page: Int = 1, perPage: Int = 500, sinceID: Int? = nil) async throws -> WavelogADIFPage {
+        var items = [
+            URLQueryItem(name: "format", value: "adif"),
+            URLQueryItem(name: "station_id", value: String(configuration.stationID)),
+            URLQueryItem(name: "page", value: String(page)),
+            URLQueryItem(name: "per_page", value: String(perPage)),
+        ]
+        if let sinceID { items.append(URLQueryItem(name: "since_id", value: String(sinceID))) }
+        let request = try makeRequest(method: "GET", resource: "qso", resourceID: nil, queryItems: items, body: nil)
+        let (data, response) = try await session.data(for: request)
+        return try decodeDirect(WavelogADIFPage.self, data: data, response: response)
+    }
+
     public func createQSO(_ qso: WavelogQSOCreate) async throws -> WavelogQSO {
         let body = try encoder.encode(WavelogCreateBody(stationProfileID: configuration.stationID, qso: qso))
-        let request = try makeRequest(method: "POST", qsoID: nil, queryItems: [], body: body)
+        let request = try makeRequest(method: "POST", resourceID: nil, queryItems: [], body: body)
         let (data, response) = try await session.data(for: request)
         return try decodeEnvelope(WavelogQSO.self, data: data, response: response)
     }
 
+    public func importADIF(_ adif: String) async throws -> WavelogImportSummary {
+        let body = try encoder.encode(WavelogADIFImportBody(
+            stationProfileID: configuration.stationID,
+            adif: adif,
+            dryrun: nil
+        ))
+        let request = try makeRequest(method: "POST", resourceID: nil, queryItems: [], body: body)
+        let (data, response) = try await session.data(for: request)
+        return try decodeEnvelope(WavelogImportSummary.self, data: data, response: response)
+    }
+
+    public func validateADIF(_ adif: String) async throws -> WavelogADIFValidation {
+        let body = try encoder.encode(WavelogADIFImportBody(
+            stationProfileID: configuration.stationID,
+            adif: adif,
+            dryrun: true
+        ))
+        let request = try makeRequest(method: "POST", resourceID: nil, queryItems: [], body: body)
+        let (data, response) = try await session.data(for: request)
+        return try decodeEnvelope(WavelogADIFValidation.self, data: data, response: response)
+    }
+
     public func updateQSO(id: Int, fields: WavelogQSOUpdate) async throws -> WavelogQSO {
         let body = try encoder.encode(fields)
-        let request = try makeRequest(method: "PATCH", qsoID: id, queryItems: [], body: body)
+        let request = try makeRequest(method: "PATCH", resourceID: id, queryItems: [], body: body)
         let (data, response) = try await session.data(for: request)
         return try decodeEnvelope(WavelogQSO.self, data: data, response: response)
     }
 
     public func deleteQSO(id: Int) async throws {
-        let request = try makeRequest(method: "DELETE", qsoID: id, queryItems: [], body: nil)
+        let request = try makeRequest(method: "DELETE", resourceID: id, queryItems: [], body: nil)
         let (_, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw WavelogClientError.invalidResponse }
         guard http.statusCode == 204 else {
@@ -253,23 +366,28 @@ public actor WavelogClient {
 
     private func makeRequest(
         method: String,
-        qsoID: Int?,
+        resource: String = "qso",
+        resourceID: Int?,
         queryItems: [URLQueryItem],
         body: Data?
     ) throws -> URLRequest {
         let root = configuration.baseURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        let suffix = qsoID.map { "/api/v2/qso/\($0)" } ?? "/api/v2/qso"
+        let suffix = resourceID.map { "/api/v2/\(resource)/\($0)" } ?? "/api/v2/\(resource)"
         guard var components = URLComponents(string: root + suffix) else { throw WavelogClientError.invalidURL }
         components.queryItems = queryItems.isEmpty ? nil : queryItems
         guard let url = components.url else { throw WavelogClientError.invalidURL }
 
-        var request = URLRequest(url: url)
+        var request = URLRequest(
+            url: url,
+            cachePolicy: .reloadIgnoringLocalCacheData,
+            timeoutInterval: 15
+        )
         request.httpMethod = method
         request.httpBody = body
-        request.timeoutInterval = 15
         request.setValue("Bearer \(configuration.token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue("Rumlog-Wavelog-Bridge/0.1.0-dev", forHTTPHeaderField: "User-Agent")
+        request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+        request.setValue("Rumlog-Wavelog-Bridge/0.1.0", forHTTPHeaderField: "User-Agent")
         if body != nil {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         }
