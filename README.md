@@ -1,8 +1,11 @@
 # RUMlog–Wavelog Bridge
 
-A macOS-native application that synchronizes RUMlogNG with Wavelog API v2.
-It uses RUMlogNG's supported Apple-event ADIF interface for committed imports
-and exports; the `.rlog` SQLite database is never modified directly.
+A macOS-native application by **Oliver Bross OM0RX** that synchronizes RUMlogNG
+with Wavelog API v2.
+It reads the selected `.rlog` logbook through a query-only SQLite connection,
+uses RUMlogNG's Apple-event ADIF interface for new-contact imports, and uses the
+native RUMlog-to-RUMlog peer stream for remote edits. The bridge never modifies
+the `.rlog` database directly.
 
 ## Current status
 
@@ -11,6 +14,18 @@ and exports; the `.rlog` SQLite database is never modified directly.
 - API tokens stored in macOS Keychain, never in preferences or logs.
 - Restart-safe, Wavelog-ID-cursor bootstrap with duplicate filtering.
 - Automatic new-contact sync in both directions after bootstrap.
+- Full edit reconciliation in both directions for the fields that both products
+  persist: QSO identity and time, frequency, band/RX band, mode, reports, grid,
+  name, comment, QTH, state/county, IOTA, QSL route, power, CQ/ITU zones, and
+  satellite name/mode.
+- Proven native RUMlog peer transport for applying remote edits without direct
+  `.rlog` writes: `QsoDeleted` followed by `QsoLogged` over the RUMlog TCP peer
+  stream.
+- Fast full-logbook scans through SQLite `READONLY` plus `PRAGMA query_only=ON`;
+  the bridge never opens the operator logbook for writing.
+- Five-minute automatic full reconciliation plus an on-demand sync action.
+- Ambiguous concurrent edits and deletions are held and reported rather than
+  guessed.
 - Durable semantic-identity ledger and ambiguity-safe Wavelog outbox.
 - Passive UDP recorder for `contactinfo`, `contactreplace`, `contactdelete`, and
   `appinfo` XML messages.
@@ -21,10 +36,48 @@ and exports; the `.rlog` SQLite database is never modified directly.
 - Typed Wavelog API v2 client for station discovery, paged JSON/ADIF QSO lists,
   create, patch, and delete operations.
 - No direct writes to RUMlog `.rlog` databases.
-- Full edit/delete propagation remains disabled until the RUMlog peer protocol is
-  captured and proven; Wavelog confirmation resources are read-only in API v2.
+- Developer ID signing is used automatically when an identity is available;
+  notarization still requires an Apple notary profile on the packaging Mac.
 
-## Build and test
+## Install the signed release
+
+1. Download `RUMlog-Wavelog-Bridge-0.2.0-macOS.zip` from the GitHub release.
+2. Expand it and move `RUMlog-Wavelog-Bridge.app` to `/Applications`.
+3. Open the app. Version 0.2.0 is signed with Oliver Bross OM0RX's Apple
+   Developer ID.
+   It is not notarized yet, so if macOS blocks the first launch, Control-click
+   the app in Finder, choose **Open**, and confirm **Open** once.
+4. Keep RUMlogNG open with the intended logbook before configuring the bridge.
+
+The application is macOS-only and requires macOS 13 or newer.
+
+## First-time configuration
+
+1. In **Wavelog API v2**, enter the full Wavelog URL including `/index.php`,
+   paste a `wl2_…` API v2 token with `station:read`, `qso:read`, and `qso:write`
+   scopes, and choose **Save & Test Connection**. Select the correct station
+   profile from the returned list. The token is saved only in macOS Keychain.
+2. In **RUMlogNG**, choose the `.rlog` file that is currently open and keep the
+   default peer port `12060` unless RUMlog is configured differently. Choose
+   **Save & Test Open Logbook**; the bridge verifies that the latest contact in
+   the selected file is visible through the running RUMlog instance.
+3. In RUMlog Preferences → UDP, enable **Listen to other RUMlog instances** on
+   the same port. In Window → Network, tick **Import** for **Wavelog Bridge**.
+   The bridge must show **Peer connected**.
+4. Choose **Start Bootstrap** once. It imports only Wavelog contacts that are
+   not already present according to the semantic QSO identity and checkpoints
+   every page so it can resume after interruption.
+5. When bootstrap reports complete, choose **Sync Contacts & Changes Now**.
+   After a successful manual cycle, enable **Automatic** and select the desired
+   interval.
+
+New contacts are checked each cycle. Existing-contact edits are checked on every
+manual sync and at least every five minutes during automatic operation. Every
+edit is read back from the destination before the reconciliation baseline moves.
+If both sides changed, the record is reported as a conflict and left untouched.
+Deletes and provider-only fields are held rather than guessed.
+
+## Build and test from source
 
 ```bash
 swift build
@@ -32,18 +85,14 @@ swift test
 ./scripts/package-app.sh
 ```
 
-The packaged app is written to `dist/RUMlog-Wavelog-Bridge.app`. Copy it to
-`/Applications`, launch RUMlogNG with the intended logbook, then open the bridge:
+The packaged app is written to `dist/RUMlog-Wavelog-Bridge.app`. Packaging uses
+the first available `Developer ID Application` identity unless
+`CODE_SIGN_IDENTITY` is set explicitly. Without one it produces an ad-hoc signed
+development build.
 
-1. Enter the Wavelog base URL and API v2 token.
-2. Test the connection and select a station profile.
-3. Test the open RUMlogNG logbook.
-4. Start the checkpointed bootstrap.
-5. Enable automatic two-way sync after bootstrap completes.
-
-On the first RUMlog test or sync, macOS may ask whether the bridge may control
-RUMlogNG. Allow that request in System Settings → Privacy & Security → Automation;
-without it, the supported Apple-event import/export interface cannot operate.
+On the first RUMlog test or new-contact import, macOS may ask whether the bridge
+may control RUMlogNG. Allow that request in System Settings → Privacy & Security
+→ Automation; without it, the Apple-event ADIF interface cannot operate.
 
 ## Passive protocol probe
 
@@ -71,16 +120,20 @@ and must never be committed without deliberate sanitization.
 ## Design boundaries
 
 - Wavelog remains behind its authenticated API; RUMlog is accessed through its
-  documented scripting dictionary and observed N1MM-compatible UDP messages.
-- New contacts are mapped through a durable identity ledger. Edit, delete, and
-  confirmation-state operation types are reserved for later proven adapters and
-  are not enabled in this build.
+  documented scripting dictionary, a strictly read-only SQLite snapshot, and
+  its observed RUMlog-to-RUMlog peer protocol.
+- New contacts are mapped through a durable identity ledger. Edit baselines are
+  persisted separately so a restart does not turn an old difference into a new
+  edit.
 - Network failures enter a durable outbox before provider I/O. Ambiguous outcomes
   become `delivery_unknown` and are reconciled rather than blindly retried.
 - Initial bootstrap uses cursor-paged ADIF and full semantic duplicate filtering.
   Wavelog `since_id` is used only for newly created contacts.
-- Automatic deletion remains disabled until both directions are proven against
-  disposable logbooks.
+- Automatic deletion remains disabled. Confirmation-state changes are also held
+  because Wavelog API v2 exposes those resources as read-only.
+- Wavelog-only propagation and SOTA/POTA/WWFF reference fields are preserved on
+  Wavelog but are not reported as synchronized because RUMlogNG 6.5.1 does not
+  persist them in its logbook schema.
 
 See [Architecture](docs/ARCHITECTURE.md) and
 [Protocol discovery](docs/PROTOCOL_DISCOVERY.md).
@@ -103,6 +156,8 @@ RUN_REPAIR=1 WAVELOG_TOKEN=… WAVELOG_URL=https://host/index.php \
   WAVELOG_STATION_ID=1 swift run -c release bridge-repair
 ```
 
-## License
+## Author and license
+
+Copyright © 2026 Oliver Bross OM0RX.
 
 GNU General Public License v3.0. See [LICENSE](LICENSE).

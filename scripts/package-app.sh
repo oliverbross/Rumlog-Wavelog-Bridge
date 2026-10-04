@@ -18,7 +18,14 @@ mkdir -p "$contents_dir/MacOS" "$contents_dir/Resources"
 cp "$bin_dir/rumlog-wavelog-bridge" "$contents_dir/MacOS/rumlog-wavelog-bridge"
 cp "$repo_dir/Resources/Info.plist" "$contents_dir/Info.plist"
 chmod 755 "$contents_dir/MacOS/rumlog-wavelog-bridge"
-signing_identity="${CODE_SIGN_IDENTITY:--}"
+signing_identity="${CODE_SIGN_IDENTITY:-}"
+if [[ -z "$signing_identity" ]]; then
+    identity_output="$(security find-identity -v -p codesigning 2>/dev/null || true)"
+    signing_identity="$(print -r -- "$identity_output" \
+        | sed -n 's/.*"\(Developer ID Application:[^"]*\)".*/\1/p' \
+        | sed -n '1p')"
+fi
+signing_identity="${signing_identity:--}"
 if [[ "$signing_identity" == "-" ]]; then
     codesign --force --deep --sign - "$app_dir"
 else

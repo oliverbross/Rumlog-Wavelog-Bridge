@@ -1,8 +1,8 @@
 # RUMlog peer protocol discovery
 
-The reliable RUMlog-to-RUMlog transport is not yet documented publicly. Do not
-guess the active TCP protocol and do not test against an operator's primary
-logbook.
+The reliable RUMlog-to-RUMlog transport is not documented publicly. The results
+below were derived in an isolated two-instance lab before the bridge was allowed
+to advertise to the operator logbook.
 
 ## Safety rules
 
@@ -31,17 +31,26 @@ For each operation, record the source and destination database state before and
 after the exchange. A packet capture alone is not proof that RUMlog accepted the
 operation.
 
-## Questions to resolve before active emulation
+## Confirmed active observations
 
-- Discovery port, cadence, broadcast address, and peer expiry.
-- Application name/version checks and logbook identity.
-- Which side initiates TCP and how the chosen port is announced.
-- Message framing, encoding, acknowledgements, replay, and reconnect behavior.
-- Whether a peer can request historical records or only receive future changes.
-- Stable contact identity and replacement semantics.
-- Loop prevention and forwarded/original markers.
-- Conflict behavior when both peers edit the same contact offline.
-- Version negotiation and behavior for unknown fields.
+- The source advertises `AppInfo` over UDP. A RUMlog instance with **Listen to
+  other RUMlog instances** enabled discovers that source and initiates TCP to the
+  advertised port.
+- The stream is framed by the ASCII delimiter `B0UnDary_73`.
+- An edit is emitted as `QsoDeleted` containing the old keyed archive, followed
+  by `QsoLogged` containing the complete replacement archive.
+- The payload is an NSKeyedArchiver graph whose root has Objective-C class name
+  `QsoClass` and the field keys observed in RUMlogNG 6.5.1.
+- The listening/importing RUMlog peer applies the replacement. The advertising
+  source does not apply records sent back into its server socket, so the bridge
+  must advertise and RUMlog must connect to it.
+- A disposable receiver database was inspected before and after the exchange to
+  prove the edit was committed; packet capture alone was not treated as proof.
+- Ping messages are echoed and peer disconnect/reconnect is supported.
+
+Historical replay, version negotiation, and confirmation-state replacement are
+still intentionally outside the implemented contract. Automatic deletion is
+also disabled.
 
 ## Passive probe
 

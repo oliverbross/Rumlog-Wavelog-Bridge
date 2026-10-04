@@ -7,6 +7,7 @@ public enum RumlogAppleEventError: Error, LocalizedError {
     case multipleInstances(Int)
     case eventFailed(number: Int, message: String)
     case invalidReply
+    case logbookMismatch(String)
 
     public var errorDescription: String? {
         switch self {
@@ -16,6 +17,8 @@ public enum RumlogAppleEventError: Error, LocalizedError {
             return "\(count) RUMlogNG instances are running. Close extras so the target logbook is unambiguous."
         case let .eventFailed(number, message): return "RUMlogNG Apple event failed (\(number)): \(message)"
         case .invalidReply: return "RUMlogNG returned an invalid Apple event reply."
+        case let .logbookMismatch(path):
+            return "The selected logbook does not match the logbook open in RUMlogNG: \(path)"
         }
     }
 }

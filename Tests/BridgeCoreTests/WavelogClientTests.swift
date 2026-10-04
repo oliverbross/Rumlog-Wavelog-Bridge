@@ -140,7 +140,80 @@ func reconcilesLiveDuplicateADIFWithoutCreatingAnotherQSO() async throws {
     }
 }
 
+@Test func readsOneWavelogQSOForWriteVerification() async throws {
+    let sessionConfiguration = URLSessionConfiguration.ephemeral
+    sessionConfiguration.protocolClasses = [ReadbackMockURLProtocol.self]
+    let session = URLSession(configuration: sessionConfiguration)
+
+    ReadbackMockURLProtocol.handler = { request in
+        #expect(request.httpMethod == "GET")
+        #expect(request.url?.path == "/index.php/api/v2/qso/178162")
+        let response = try #require(HTTPURLResponse(
+            url: request.url!,
+            statusCode: 200,
+            httpVersion: nil,
+            headerFields: ["Content-Type": "application/json"]
+        ))
+        return (response, Data("""
+        {"data":{"id":178162,"station_id":1,"call":"HB9OAU/P","band":"40m","mode":"SSB","submode":null,"freq":"7102000","freq_rx":null,"qso_date":"2026-10-04 07:47:32","rst_sent":"59","rst_rcvd":"59","gridsquare":null,"name":null,"comment":"verified","notes":null,"qth":null},"error":null}
+        """.utf8))
+    }
+    defer { ReadbackMockURLProtocol.handler = nil }
+
+    let client = WavelogClient(configuration: try WavelogConfiguration(
+        baseURL: URL(string: "http://127.0.0.1/index.php")!,
+        token: "wl2_test_token",
+        stationID: 1
+    ), session: session)
+    let qso = try await client.getQSO(id: 178162)
+    #expect(qso.id == 178162)
+    #expect(qso.comment == "verified")
+}
+
+@Test func decodesNumericAndStringWavelogMeasurements() throws {
+    let numeric = try JSONDecoder().decode(WavelogQSO.self, from: Data("""
+    {"id":1,"station_id":7,"call":"N0TEST","band":"20m","mode":"SSB",
+     "submode":null,"freq":14075000,"freq_rx":14076000,"band_rx":"20m",
+     "qso_date":"2026-10-04 08:00:00","tx_pwr":100.5,"cqz":4,"ituz":8}
+    """.utf8))
+    let strings = try JSONDecoder().decode(WavelogQSO.self, from: Data("""
+    {"id":2,"station_id":7,"call":"N0TEST","band":"20m","mode":"SSB",
+     "submode":null,"freq":"14075000","freq_rx":"14076000","band_rx":"20m",
+     "qso_date":"2026-10-04 08:00:00","tx_pwr":"100.5","cqz":"4","ituz":"8"}
+    """.utf8))
+
+    #expect(numeric.frequency == strings.frequency)
+    #expect(numeric.receiveFrequency == strings.receiveFrequency)
+    #expect(numeric.power == strings.power)
+    #expect(numeric.cqZone == strings.cqZone)
+    #expect(numeric.ituZone == strings.ituZone)
+}
+
 private final class MockURLProtocol: URLProtocol {
+    nonisolated(unsafe) static var handler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        guard let handler = Self.handler else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
+            return
+        }
+        do {
+            let (response, data) = try handler(request)
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: data)
+            client?.urlProtocolDidFinishLoading(self)
+        } catch {
+            client?.urlProtocol(self, didFailWithError: error)
+        }
+    }
+
+    override func stopLoading() {}
+}
+
+private final class ReadbackMockURLProtocol: URLProtocol {
     nonisolated(unsafe) static var handler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
 
     override class func canInit(with request: URLRequest) -> Bool { true }

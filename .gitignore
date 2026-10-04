@@ -67,6 +67,7 @@ fastlane/test_output
 .env.*
 captures/
 state/
+work/
 *.ndjson
 *.pcap
 *.pcapng

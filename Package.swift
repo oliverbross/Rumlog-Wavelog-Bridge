@@ -20,6 +20,7 @@ let package = Package(
             name: "BridgeCore",
             linkerSettings: [
                 .linkedFramework("Security"),
+                .linkedLibrary("sqlite3"),
             ]
         ),
         .executableTarget(

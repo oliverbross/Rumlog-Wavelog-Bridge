@@ -110,6 +110,32 @@ import Testing
     try await store.saveContinuousSyncState(continuous)
     #expect(try await store.loadContinuousSyncState(stationID: 2) == continuous)
     #expect(try await store.loadContinuousSyncState(stationID: 1).knownFingerprints.isEmpty)
+
+    let stationOneBootstrap = BootstrapState(
+        stationID: 1,
+        importedCount: 12,
+        updatedAt: Date(timeIntervalSince1970: 12)
+    )
+    let stationOneContinuous = ContinuousSyncState(stationID: 1, lastWavelogID: 12)
+    let stationOneReconciliation = ReconciliationState(
+        stationID: 1,
+        lastRunAt: Date(timeIntervalSince1970: 12)
+    )
+    let stationTwoReconciliation = ReconciliationState(
+        stationID: 2,
+        lastRunAt: Date(timeIntervalSince1970: 99)
+    )
+    try await store.saveBootstrapState(stationOneBootstrap)
+    try await store.saveContinuousSyncState(stationOneContinuous)
+    try await store.saveReconciliationState(stationOneReconciliation)
+    try await store.saveReconciliationState(stationTwoReconciliation)
+
+    #expect(try await store.loadBootstrapState(stationID: 1) == stationOneBootstrap)
+    #expect(try await store.loadBootstrapState(stationID: 2).importedCount == 1_500)
+    #expect(try await store.loadContinuousSyncState(stationID: 1) == stationOneContinuous)
+    #expect(try await store.loadContinuousSyncState(stationID: 2) == continuous)
+    #expect(try await store.loadReconciliationState(stationID: 1) == stationOneReconciliation)
+    #expect(try await store.loadReconciliationState(stationID: 2) == stationTwoReconciliation)
 }
 
 @Test(.enabled(if: ProcessInfo.processInfo.environment["RUN_RUMLOG_INTEGRATION"] == "1"))

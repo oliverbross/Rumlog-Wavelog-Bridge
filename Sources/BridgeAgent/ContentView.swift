@@ -100,8 +100,21 @@ struct ContentView: View {
                     }
                     GridRow {
                         Text("Target logbook")
-                        Text("The logbook currently open in the single running RUMlogNG instance")
-                            .foregroundStyle(.secondary)
+                        HStack {
+                            TextField(
+                                "Choose the .rlog file currently open in RUMlog",
+                                text: Binding(
+                                    get: { model.settings.rumlogLogbookPath ?? "" },
+                                    set: { model.settings.rumlogLogbookPath = $0.isEmpty ? nil : $0 }
+                                )
+                            )
+                            Button("Choose…", action: model.chooseRumlogLogbook)
+                        }
+                    }
+                    GridRow {
+                        Text("Peer port")
+                        TextField("12060", value: $model.settings.rumlogUDPPort, format: .number)
+                            .frame(width: 100)
                     }
                 }
                 HStack(spacing: 16) {
@@ -113,12 +126,16 @@ struct ContentView: View {
                         model.rumlogInstanceCount == 1 ? "1 instance" : "\(model.rumlogInstanceCount) instances",
                         systemImage: model.rumlogInstanceCount == 1 ? "checkmark.circle.fill" : "exclamationmark.triangle"
                     )
+                    Label(
+                        model.rumlogPeerConnected ? "Peer connected" : "Peer waiting",
+                        systemImage: model.rumlogPeerConnected ? "network.badge.shield.half.filled" : "network"
+                    )
                     Spacer()
                     Button("Save & Test Open Logbook", action: model.testRumlog)
                         .disabled(model.isBusy)
                 }
             }
-            Text("Imports use RUMlogNG’s supported SaveAdif Apple event. The bridge never writes directly to the .rlog SQLite database.")
+            Text("\(model.rumlogPeerStatus). The selected .rlog file is read through SQLite’s read-only mode for fast change detection. Writes use only RUMlog’s Apple event and peer interfaces. Enable ‘Listen to other RUMlog instances’ on this port, then tick Import for Wavelog Bridge in Window → Network.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .padding(.top, 8)
@@ -160,7 +177,7 @@ struct ContentView: View {
 
     private var limitationCard: some View {
         GroupBox("Provider boundary") {
-            Text("This build synchronizes new contacts in both directions and preserves the ADIF fields accepted by each side. Edit and delete propagation is held until RUMlog peer semantics are proven. Wavelog confirmation resources are read-only through API v2, so later LoTW/eQSL/QSL confirmation changes are not reported as synchronized.")
+            Text("New contacts and ordinary QSO edits synchronize in both directions. Identity changes are accepted only when they resolve to one unambiguous record. Deletes remain held on both sides, and Wavelog confirmation resources are read-only through API v2, so LoTW/eQSL/QSL confirmation changes are not reported as synchronized.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
         }
@@ -170,7 +187,7 @@ struct ContentView: View {
         GroupBox("Two-way live sync") {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    Button("Sync New Contacts Now", action: model.syncNow)
+                    Button("Sync Contacts & Changes Now", action: model.syncNow)
                         .disabled(!model.canLiveSync)
                     Toggle(
                         "Automatic",
@@ -180,7 +197,7 @@ struct ContentView: View {
                         )
                     )
                     .toggleStyle(.switch)
-                    .disabled(!model.bootstrap.completed)
+                    .disabled(!model.settings.automaticSync && !model.canLiveSync)
                     Spacer()
                     Picker(
                         "Every",
@@ -200,7 +217,7 @@ struct ContentView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                Text("New contacts are synchronized in both directions. An outbox records Wavelog writes before network I/O; ambiguous deliveries stop for reconciliation instead of being blindly duplicated.")
+                Text("New contacts synchronize on every cycle. A complete reconciliation checks edits at least every five minutes and whenever you press Sync; conflicting two-sided edits and deletions are held rather than guessed.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

@@ -5,6 +5,7 @@ public struct BridgeSettings: Codable, Equatable, Sendable {
     public var stationID: Int
     public var stationName: String
     public var rumlogBundleIdentifier: String
+    public var rumlogLogbookPath: String?
     public var rumlogUDPPort: UInt16
     public var pollIntervalSeconds: Int
     public var bootstrapPageSize: Int
@@ -15,6 +16,7 @@ public struct BridgeSettings: Codable, Equatable, Sendable {
         stationID: Int = 1,
         stationName: String = "Podkylava",
         rumlogBundleIdentifier: String = "de.dl2rum.RUMlogNG",
+        rumlogLogbookPath: String? = nil,
         rumlogUDPPort: UInt16 = 12060,
         pollIntervalSeconds: Int = 60,
         bootstrapPageSize: Int = 500,
@@ -24,6 +26,7 @@ public struct BridgeSettings: Codable, Equatable, Sendable {
         self.stationID = stationID
         self.stationName = stationName
         self.rumlogBundleIdentifier = rumlogBundleIdentifier
+        self.rumlogLogbookPath = rumlogLogbookPath
         self.rumlogUDPPort = rumlogUDPPort
         self.pollIntervalSeconds = pollIntervalSeconds
         self.bootstrapPageSize = bootstrapPageSize
@@ -89,6 +92,7 @@ public actor BridgeFileStore {
     private let settingsURL: URL
     private let bootstrapURL: URL
     private let syncURL: URL
+    private let reconciliationURL: URL
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
 
@@ -100,6 +104,7 @@ public actor BridgeFileStore {
         settingsURL = base.appendingPathComponent("settings.json")
         bootstrapURL = base.appendingPathComponent("bootstrap.json")
         syncURL = base.appendingPathComponent("sync.json")
+        reconciliationURL = base.appendingPathComponent("reconciliation.json")
         encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
@@ -117,31 +122,79 @@ public actor BridgeFileStore {
     }
 
     public func loadBootstrapState(stationID: Int) throws -> BootstrapState {
+        let scopedURL = stationStateURL(prefix: "bootstrap", stationID: stationID)
+        if FileManager.default.fileExists(atPath: scopedURL.path) {
+            return try decoder.decode(BootstrapState.self, from: Data(contentsOf: scopedURL))
+        }
         guard FileManager.default.fileExists(atPath: bootstrapURL.path) else {
             return BootstrapState(stationID: stationID)
         }
-        let saved = try decoder.decode(BootstrapState.self, from: Data(contentsOf: bootstrapURL))
-        return saved.stationID == stationID ? saved : BootstrapState(stationID: stationID)
+        let data = try Data(contentsOf: bootstrapURL)
+        let saved = try decoder.decode(BootstrapState.self, from: data)
+        guard saved.stationID == stationID else { return BootstrapState(stationID: stationID) }
+        try atomicWrite(data, to: scopedURL)
+        return saved
     }
 
     public func saveBootstrapState(_ state: BootstrapState) throws {
-        try atomicWrite(try encoder.encode(state), to: bootstrapURL)
+        try atomicWrite(
+            try encoder.encode(state),
+            to: stationStateURL(prefix: "bootstrap", stationID: state.stationID)
+        )
     }
 
     public func loadContinuousSyncState(stationID: Int) throws -> ContinuousSyncState {
+        let scopedURL = stationStateURL(prefix: "sync", stationID: stationID)
+        if FileManager.default.fileExists(atPath: scopedURL.path) {
+            return try decoder.decode(ContinuousSyncState.self, from: Data(contentsOf: scopedURL))
+        }
         guard FileManager.default.fileExists(atPath: syncURL.path) else {
             return ContinuousSyncState(stationID: stationID)
         }
-        let saved = try decoder.decode(ContinuousSyncState.self, from: Data(contentsOf: syncURL))
-        return saved.stationID == stationID ? saved : ContinuousSyncState(stationID: stationID)
+        let data = try Data(contentsOf: syncURL)
+        let saved = try decoder.decode(ContinuousSyncState.self, from: data)
+        guard saved.stationID == stationID else { return ContinuousSyncState(stationID: stationID) }
+        try atomicWrite(data, to: scopedURL)
+        return saved
     }
 
     public func saveContinuousSyncState(_ state: ContinuousSyncState) throws {
-        try atomicWrite(try encoder.encode(state), to: syncURL)
+        try atomicWrite(
+            try encoder.encode(state),
+            to: stationStateURL(prefix: "sync", stationID: state.stationID)
+        )
+    }
+
+    public func loadReconciliationState(stationID: Int) throws -> ReconciliationState {
+        let scopedURL = stationStateURL(prefix: "reconciliation", stationID: stationID)
+        if FileManager.default.fileExists(atPath: scopedURL.path) {
+            return try decoder.decode(ReconciliationState.self, from: Data(contentsOf: scopedURL))
+        }
+        guard FileManager.default.fileExists(atPath: reconciliationURL.path) else {
+            return ReconciliationState(stationID: stationID)
+        }
+        let data = try Data(contentsOf: reconciliationURL)
+        let saved = try decoder.decode(ReconciliationState.self, from: data)
+        guard saved.stationID == stationID else { return ReconciliationState(stationID: stationID) }
+        try atomicWrite(data, to: scopedURL)
+        return saved
+    }
+
+    public func saveReconciliationState(_ state: ReconciliationState) throws {
+        let compactEncoder = JSONEncoder()
+        compactEncoder.dateEncodingStrategy = .iso8601
+        try atomicWrite(
+            try compactEncoder.encode(state),
+            to: stationStateURL(prefix: "reconciliation", stationID: state.stationID)
+        )
     }
 
     public func ledgerURL() -> URL {
         directoryURL.appendingPathComponent("ledger.json")
+    }
+
+    private func stationStateURL(prefix: String, stationID: Int) -> URL {
+        directoryURL.appendingPathComponent("\(prefix)-station-\(stationID).json")
     }
 
     private func atomicWrite(_ data: Data, to url: URL) throws {

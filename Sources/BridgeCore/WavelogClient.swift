@@ -27,6 +27,7 @@ public enum WavelogClientError: Error, LocalizedError {
     case invalidConfiguration(String)
     case invalidURL
     case invalidResponse
+    case writeVerificationFailed(id: Int)
     case rejected(status: Int, code: String?, message: String?)
 
     public var errorDescription: String? {
@@ -34,6 +35,8 @@ public enum WavelogClientError: Error, LocalizedError {
         case let .invalidConfiguration(message): return message
         case .invalidURL: return "Could not construct the Wavelog API URL."
         case .invalidResponse: return "Wavelog returned an invalid response."
+        case let .writeVerificationFailed(id):
+            return "Wavelog QSO \(id) did not match the requested edit after readback; the reconciliation baseline was not advanced."
         case let .rejected(status, code, message):
             return "Wavelog rejected the request (HTTP \(status), \(code ?? "unknown")): \(message ?? "no message")"
         }
@@ -47,10 +50,11 @@ public struct WavelogQSO: Codable, Equatable, Sendable {
     public let band: String
     public let mode: String
     public let submode: String?
-    // Wavelog API v2 serializes read-side frequencies as strings, even though
-    // create and patch accept numeric Hz values.
+    // Deployed Wavelog versions have returned both numeric and string JSON
+    // representations. Decoding normalizes either representation to text.
     public let frequency: String?
     public let receiveFrequency: String?
+    public let receiveBand: String?
     public let qsoDate: String
     public let rstSent: String?
     public let rstReceived: String?
@@ -59,16 +63,75 @@ public struct WavelogQSO: Codable, Equatable, Sendable {
     public let comment: String?
     public let notes: String?
     public let qth: String?
+    public let state: String?
+    public let county: String?
+    public let iota: String?
+    public let qslVia: String?
+    public let power: String?
+    public let cqZone: String?
+    public let ituZone: String?
+    public let propagationMode: String?
+    public let satelliteName: String?
+    public let satelliteMode: String?
+    public let sotaReference: String?
+    public let potaReference: String?
+    public let wwffReference: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, call, band, mode, submode, name, comment, notes, qth
+        case id, call, band, mode, submode, name, comment, notes, qth, state, iota
         case stationID = "station_id"
         case frequency = "freq"
         case receiveFrequency = "freq_rx"
+        case receiveBand = "band_rx"
         case qsoDate = "qso_date"
         case rstSent = "rst_sent"
         case rstReceived = "rst_rcvd"
         case gridSquare = "gridsquare"
+        case county = "cnty"
+        case qslVia = "qsl_via"
+        case power = "tx_pwr"
+        case cqZone = "cqz"
+        case ituZone = "ituz"
+        case propagationMode = "prop_mode"
+        case satelliteName = "sat_name"
+        case satelliteMode = "sat_mode"
+        case sotaReference = "sota_ref"
+        case potaReference = "pota_ref"
+        case wwffReference = "wwff_ref"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(Int.self, forKey: .id)
+        stationID = try container.decodeIfPresent(Int.self, forKey: .stationID)
+        call = try container.decode(String.self, forKey: .call)
+        band = try container.decode(String.self, forKey: .band)
+        mode = try container.decode(String.self, forKey: .mode)
+        submode = try container.decodeIfPresent(String.self, forKey: .submode)
+        frequency = try container.decodeFlexibleStringIfPresent(forKey: .frequency)
+        receiveFrequency = try container.decodeFlexibleStringIfPresent(forKey: .receiveFrequency)
+        receiveBand = try container.decodeIfPresent(String.self, forKey: .receiveBand)
+        qsoDate = try container.decode(String.self, forKey: .qsoDate)
+        rstSent = try container.decodeIfPresent(String.self, forKey: .rstSent)
+        rstReceived = try container.decodeIfPresent(String.self, forKey: .rstReceived)
+        gridSquare = try container.decodeIfPresent(String.self, forKey: .gridSquare)
+        name = try container.decodeIfPresent(String.self, forKey: .name)
+        comment = try container.decodeIfPresent(String.self, forKey: .comment)
+        notes = try container.decodeIfPresent(String.self, forKey: .notes)
+        qth = try container.decodeIfPresent(String.self, forKey: .qth)
+        state = try container.decodeIfPresent(String.self, forKey: .state)
+        county = try container.decodeIfPresent(String.self, forKey: .county)
+        iota = try container.decodeIfPresent(String.self, forKey: .iota)
+        qslVia = try container.decodeIfPresent(String.self, forKey: .qslVia)
+        power = try container.decodeFlexibleStringIfPresent(forKey: .power)
+        cqZone = try container.decodeFlexibleStringIfPresent(forKey: .cqZone)
+        ituZone = try container.decodeFlexibleStringIfPresent(forKey: .ituZone)
+        propagationMode = try container.decodeIfPresent(String.self, forKey: .propagationMode)
+        satelliteName = try container.decodeIfPresent(String.self, forKey: .satelliteName)
+        satelliteMode = try container.decodeIfPresent(String.self, forKey: .satelliteMode)
+        sotaReference = try container.decodeIfPresent(String.self, forKey: .sotaReference)
+        potaReference = try container.decodeIfPresent(String.self, forKey: .potaReference)
+        wwffReference = try container.decodeIfPresent(String.self, forKey: .wwffReference)
     }
 }
 
@@ -159,21 +222,50 @@ public struct WavelogQSOCreate: Codable, Equatable, Sendable {
     public let qsoDate: String
     public let timeOn: String
     public var frequency: Int64?
+    public var receiveFrequency: Int64?
+    public var receiveBand: String?
     public var rstSent: String?
     public var rstReceived: String?
     public var gridSquare: String?
     public var name: String?
     public var comment: String?
     public var notes: String?
+    public var qth: String?
+    public var state: String?
+    public var county: String?
+    public var iota: String?
+    public var qslVia: String?
+    public var power: String?
+    public var cqZone: String?
+    public var ituZone: String?
+    public var propagationMode: String?
+    public var satelliteName: String?
+    public var satelliteMode: String?
+    public var sotaReference: String?
+    public var potaReference: String?
+    public var wwffReference: String?
 
     enum CodingKeys: String, CodingKey {
-        case call, band, mode, name, comment, notes
+        case call, band, mode, name, comment, notes, qth, state, iota
         case qsoDate = "qso_date"
         case timeOn = "time_on"
         case frequency = "freq"
+        case receiveFrequency = "freq_rx"
+        case receiveBand = "band_rx"
         case rstSent = "rst_sent"
         case rstReceived = "rst_rcvd"
         case gridSquare = "gridsquare"
+        case county = "cnty"
+        case qslVia = "qsl_via"
+        case power = "tx_pwr"
+        case cqZone = "cqz"
+        case ituZone = "ituz"
+        case propagationMode = "prop_mode"
+        case satelliteName = "sat_name"
+        case satelliteMode = "sat_mode"
+        case sotaReference = "sota_ref"
+        case potaReference = "pota_ref"
+        case wwffReference = "wwff_ref"
     }
 
     public init(call: String, band: String, mode: String, qsoDate: String, timeOn: String) {
@@ -192,21 +284,48 @@ public struct WavelogQSOUpdate: Codable, Equatable, Sendable {
     public var qsoDate: String?
     public var timeOn: String?
     public var frequency: Int64?
+    public var receiveBand: String?
     public var rstSent: String?
     public var rstReceived: String?
     public var gridSquare: String?
     public var name: String?
     public var comment: String?
     public var notes: String?
+    public var qth: String?
+    public var state: String?
+    public var county: String?
+    public var iota: String?
+    public var qslVia: String?
+    public var power: String?
+    public var cqZone: String?
+    public var ituZone: String?
+    public var propagationMode: String?
+    public var satelliteName: String?
+    public var satelliteMode: String?
+    public var sotaReference: String?
+    public var potaReference: String?
+    public var wwffReference: String?
 
     enum CodingKeys: String, CodingKey {
-        case call, band, mode, name, comment, notes
+        case call, band, mode, name, comment, notes, qth, state, iota
         case qsoDate = "qso_date"
         case timeOn = "time_on"
         case frequency = "freq"
+        case receiveBand = "band_rx"
         case rstSent = "rst_sent"
         case rstReceived = "rst_rcvd"
         case gridSquare = "gridsquare"
+        case county = "cnty"
+        case qslVia = "qsl_via"
+        case power = "tx_pwr"
+        case cqZone = "cqz"
+        case ituZone = "ituz"
+        case propagationMode = "prop_mode"
+        case satelliteName = "sat_name"
+        case satelliteMode = "sat_mode"
+        case sotaReference = "sota_ref"
+        case potaReference = "pota_ref"
+        case wwffReference = "wwff_ref"
     }
 
     public init() {}
@@ -222,20 +341,50 @@ private struct WavelogAPIError: Codable, Sendable {
     let message: String?
 }
 
+private extension KeyedDecodingContainer {
+    func decodeFlexibleStringIfPresent(forKey key: Key) throws -> String? {
+        guard contains(key), try !decodeNil(forKey: key) else { return nil }
+        if let value = try? decode(String.self, forKey: key) { return value }
+        if let value = try? decode(Decimal.self, forKey: key) {
+            return NSDecimalNumber(decimal: value).stringValue
+        }
+        throw DecodingError.typeMismatch(
+            String.self,
+            DecodingError.Context(
+                codingPath: codingPath + [key],
+                debugDescription: "Expected a JSON string or number."
+            )
+        )
+    }
+}
+
 private struct WavelogCreateBody: Encodable {
     let stationProfileID: Int
     let qso: WavelogQSOCreate
 
     enum CodingKeys: String, CodingKey {
-        case call, band, mode, name, comment, notes
+        case call, band, mode, name, comment, notes, qth, state, iota
         case importType = "import_type"
         case stationProfileID = "station_profile_id"
         case qsoDate = "qso_date"
         case timeOn = "time_on"
         case frequency = "freq"
+        case receiveFrequency = "freq_rx"
+        case receiveBand = "band_rx"
         case rstSent = "rst_sent"
         case rstReceived = "rst_rcvd"
         case gridSquare = "gridsquare"
+        case county = "cnty"
+        case qslVia = "qsl_via"
+        case power = "tx_pwr"
+        case cqZone = "cqz"
+        case ituZone = "ituz"
+        case propagationMode = "prop_mode"
+        case satelliteName = "sat_name"
+        case satelliteMode = "sat_mode"
+        case sotaReference = "sota_ref"
+        case potaReference = "pota_ref"
+        case wwffReference = "wwff_ref"
     }
 
     init(stationProfileID: Int, qso: WavelogQSOCreate) {
@@ -253,12 +402,28 @@ private struct WavelogCreateBody: Encodable {
         try container.encode(qso.qsoDate, forKey: .qsoDate)
         try container.encode(qso.timeOn, forKey: .timeOn)
         try container.encodeIfPresent(qso.frequency, forKey: .frequency)
+        try container.encodeIfPresent(qso.receiveFrequency, forKey: .receiveFrequency)
+        try container.encodeIfPresent(qso.receiveBand, forKey: .receiveBand)
         try container.encodeIfPresent(qso.rstSent, forKey: .rstSent)
         try container.encodeIfPresent(qso.rstReceived, forKey: .rstReceived)
         try container.encodeIfPresent(qso.gridSquare, forKey: .gridSquare)
         try container.encodeIfPresent(qso.name, forKey: .name)
         try container.encodeIfPresent(qso.comment, forKey: .comment)
         try container.encodeIfPresent(qso.notes, forKey: .notes)
+        try container.encodeIfPresent(qso.qth, forKey: .qth)
+        try container.encodeIfPresent(qso.state, forKey: .state)
+        try container.encodeIfPresent(qso.county, forKey: .county)
+        try container.encodeIfPresent(qso.iota, forKey: .iota)
+        try container.encodeIfPresent(qso.qslVia, forKey: .qslVia)
+        try container.encodeIfPresent(qso.power, forKey: .power)
+        try container.encodeIfPresent(qso.cqZone, forKey: .cqZone)
+        try container.encodeIfPresent(qso.ituZone, forKey: .ituZone)
+        try container.encodeIfPresent(qso.propagationMode, forKey: .propagationMode)
+        try container.encodeIfPresent(qso.satelliteName, forKey: .satelliteName)
+        try container.encodeIfPresent(qso.satelliteMode, forKey: .satelliteMode)
+        try container.encodeIfPresent(qso.sotaReference, forKey: .sotaReference)
+        try container.encodeIfPresent(qso.potaReference, forKey: .potaReference)
+        try container.encodeIfPresent(qso.wwffReference, forKey: .wwffReference)
     }
 }
 
@@ -298,6 +463,12 @@ public actor WavelogClient {
         let request = try makeRequest(method: "GET", resourceID: nil, queryItems: items, body: nil)
         let (data, response) = try await session.data(for: request)
         return try decodeDirect(WavelogQSOPage.self, data: data, response: response)
+    }
+
+    public func getQSO(id: Int) async throws -> WavelogQSO {
+        let request = try makeRequest(method: "GET", resourceID: id, queryItems: [], body: nil)
+        let (data, response) = try await session.data(for: request)
+        return try decodeEnvelope(WavelogQSO.self, data: data, response: response)
     }
 
     public func listStations() async throws -> [WavelogStation] {
@@ -387,7 +558,7 @@ public actor WavelogClient {
         request.setValue("Bearer \(configuration.token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
-        request.setValue("Rumlog-Wavelog-Bridge/0.1.0", forHTTPHeaderField: "User-Agent")
+        request.setValue("Rumlog-Wavelog-Bridge/0.2.0", forHTTPHeaderField: "User-Agent")
         if body != nil {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         }
