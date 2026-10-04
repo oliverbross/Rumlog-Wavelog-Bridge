@@ -60,3 +60,15 @@ fastlane/report.xml
 fastlane/Preview.html
 fastlane/screenshots/**/*.png
 fastlane/test_output
+
+# Local bridge state and protocol captures may contain station/QSO data.
+.env
+.env.*
+captures/
+state/
+*.ndjson
+*.pcap
+*.pcapng
+*.rlog
+*.rlog-shm
+*.rlog-wal
