@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.1 — 2026-10-05
+
+Official project release by Oliver Bross OM0RX.
+
+- Adds the live application screenshot and complete release, setup, operation,
+  architecture, audit, repair, build, and license documentation.
+- Refreshes the displayed RUMlogNG process count whenever the native peer connects
+  or disconnects, so the interface cannot retain a stale instance indicator.
+- Publishes a Developer ID signed macOS 13+ application under GPL-3.0-only.
+  This release is not yet Apple-notarized; follow the first-launch instructions in
+  the README.
+
 ## 0.2.0 — 2026-10-05
 
 First public signed release by Oliver Bross OM0RX.

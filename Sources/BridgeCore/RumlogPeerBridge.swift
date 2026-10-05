@@ -170,7 +170,7 @@ public final class RumlogPeerBridge: @unchecked Sendable {
         <?xml version="1.0" encoding="UTF-8"?>
         <AppInfo>
             <Application>RUMlogNG</Application>
-            <AppVersion>RUMlog-Wavelog Bridge 0.2.0</AppVersion>
+            <AppVersion>RUMlog-Wavelog Bridge 0.2.1</AppVersion>
             <StationName>\(xmlEscaped(stationName))</StationName>
             <dbname>\(xmlEscaped(logName))</dbname>
             <ShownDxcc></ShownDxcc>
@@ -235,7 +235,7 @@ enum RumlogPeerWire {
         return Data("""
         <?xml version="1.0" encoding="UTF-8"?>
         <RUMlogNG>
-            <AppVersion>RUMlog-Wavelog Bridge 0.2.0</AppVersion>
+            <AppVersion>RUMlog-Wavelog Bridge 0.2.1</AppVersion>
             <StationName>\(xmlEscaped(stationName))</StationName>
             <\(kind)>
                 <QSO_Data>\(encoded)</QSO_Data>

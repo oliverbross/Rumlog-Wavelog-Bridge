@@ -1,11 +1,17 @@
 # RUMlog–Wavelog Bridge
 
+[![Latest release](https://img.shields.io/github/v/release/oliverbross/Rumlog-Wavelog-Bridge)](https://github.com/oliverbross/Rumlog-Wavelog-Bridge/releases/latest)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
+![macOS 13+](https://img.shields.io/badge/macOS-13%2B-black)
+
 A macOS-native application by **Oliver Bross OM0RX** that synchronizes RUMlogNG
 with Wavelog API v2.
 It reads the selected `.rlog` logbook through a query-only SQLite connection,
 uses RUMlogNG's Apple-event ADIF interface for new-contact imports, and uses the
 native RUMlog-to-RUMlog peer stream for remote edits. The bridge never modifies
 the `.rlog` database directly.
+
+![RUMlog–Wavelog Bridge synchronizing a live logbook](docs/images/app-overview.png)
 
 ## Current status
 
@@ -41,9 +47,9 @@ the `.rlog` database directly.
 
 ## Install the signed release
 
-1. Download `RUMlog-Wavelog-Bridge-0.2.0-macOS.zip` from the GitHub release.
+1. Download `RUMlog-Wavelog-Bridge-0.2.1-macOS.zip` from the GitHub release.
 2. Expand it and move `RUMlog-Wavelog-Bridge.app` to `/Applications`.
-3. Open the app. Version 0.2.0 is signed with Oliver Bross OM0RX's Apple
+3. Open the app. Version 0.2.1 is signed with Oliver Bross OM0RX's Apple
    Developer ID.
    It is not notarized yet, so if macOS blocks the first launch, Control-click
    the app in Finder, choose **Open**, and confirm **Open** once.

@@ -467,6 +467,7 @@ final class BridgeAppModel: ObservableObject {
                 logName: "\(settings.stationName) via Wavelog"
             ) { [weak self] connected, message in
                 Task { @MainActor [weak self] in
+                    self?.refreshRumlogState()
                     self?.rumlogPeerConnected = connected
                     self?.rumlogPeerStatus = message
                 }
