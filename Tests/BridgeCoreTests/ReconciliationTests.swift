@@ -115,6 +115,31 @@ import Testing
     #expect(ReconciliationState(stationID: 1).localSnapshotVersion == RumlogSQLiteReader.snapshotVersion)
 }
 
+@Test func legacyContinuousSyncStateDecodesWithoutIncrementalCheckpoints() throws {
+    let state = try JSONDecoder().decode(
+        ContinuousSyncState.self,
+        from: Data(#"{"stationID":1,"lastWavelogID":42,"lastRumlogScanAt":null,"knownFingerprints":[],"lastSuccessAt":null}"#.utf8)
+    )
+
+    #expect(state.lastRumlogRowID == nil)
+    #expect(state.lastReconciliationAt == nil)
+}
+
+@Test func duplicateWavelogPageRowsAreDeduplicatedByID() throws {
+    let data = Data(#"""
+    [
+      {"id":178162,"station_id":1,"call":"HB9OAU/P","band":"40m","mode":"SSB","freq":"7102000","qso_date":"2026-10-04 07:47:32","comment":"first"},
+      {"id":178162,"station_id":1,"call":"HB9OAU/P","band":"40m","mode":"SSB","freq":"7102000","qso_date":"2026-10-04 07:47:32","comment":"latest"}
+    ]
+    """#.utf8)
+    let rows = try JSONDecoder().decode([WavelogQSO].self, from: data)
+    let deduplicated = deduplicatedWavelogQSOs(rows)
+
+    #expect(deduplicated.count == 1)
+    #expect(deduplicated.first?.id == 178162)
+    #expect(deduplicated.first?.comment == "latest")
+}
+
 @Test func legacyEditableSnapshotDecodesWithNewFieldsEmpty() throws {
     let data = Data(#"""
     {
@@ -206,6 +231,12 @@ func readsTheLiveRumlogLogbookWithoutWriting() throws {
     #expect(!records.isEmpty)
     #expect(try reader.count() == records.count)
     #expect(records.allSatisfy { Int64($0["APP_RUMLOG_ROWID"] ?? "") != nil })
+    let maybeMaximumRowID = try reader.maximumRowID()
+    let maximumRowID = try #require(maybeMaximumRowID)
+    let recent = try reader.records(afterRowID: max(0, maximumRowID - 10))
+    #expect(recent.allSatisfy { (Int64($0["APP_RUMLOG_ROWID"] ?? "") ?? 0) > maximumRowID - 10 })
+    #expect(recent.last?["APP_RUMLOG_ROWID"] == String(maximumRowID))
+    #expect(try reader.records(afterRowID: maximumRowID).isEmpty)
 }
 
 @Test(.enabled(if: ProcessInfo.processInfo.environment["RUN_RUMLOG_PEER_LAB"] == "1"))

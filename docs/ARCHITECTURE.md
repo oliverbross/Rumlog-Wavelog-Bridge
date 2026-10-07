@@ -63,11 +63,24 @@ change without changing the contact.
   `PRAGMA query_only=ON`; it is never modified by the bridge.
 - RUMlog Apple-event ADIF remains the supported create/import path.
 - RUMlog peer replacement is the write path for Wavelog-originated edits.
+- Peer discovery broadcasts from the active local interface. This gives RUMlog a
+  distinct source identity and prevents another `SO_REUSEPORT` listener from
+  consuming every UDP discovery packet. The TCP peer accepts only a connection
+  whose source is the bridge Mac's own selected interface address.
 - Wavelog `since_id` accelerates retrieval of newly created rows only.
+- A durable RUMlog row-ID high-water mark limits normal one-minute local scans to
+  newly inserted rows. Migration reads only a bounded recent tail when a prior
+  fingerprint baseline exists; a complete local read is reserved for initial
+  baseline or interrupted inbound-import recovery.
 - Initial bootstrap checkpoints Wavelog's `lastfetchedid` cursor; crash recovery
   uses a full scoped RUMlog snapshot before resuming after that cursor.
-- Full inventories are reconciled every five minutes for edits because
-  `since_id` does not report updates to existing rows.
+- Full inventories are reconciled every five minutes while the native edit peer
+  is connected because `since_id` does not report updates to existing rows.
+  The last successful reconciliation time survives restart, and a startup grace
+  period lets new-contact synchronization finish before any overdue full pass.
+- Remote pages are collapsed by Wavelog QSO ID before indexing. A repeated row
+  caused by a moving pagination window cannot create a duplicate-key process
+  trap.
 - Persisted per-contact snapshots identify which side changed. If both sides
   changed incompatibly, the bridge records a conflict instead of choosing a
   winner. Absence is held rather than translated into deletion.

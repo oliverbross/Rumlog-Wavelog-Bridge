@@ -24,6 +24,18 @@ public struct RumlogSQLiteReader: Sendable {
     }
 
     public func records() throws -> [ADIFRecord] {
+        try records(whereClause: "ORDER BY id", bindID: nil, reserveCapacity: 70_000)
+    }
+
+    public func records(afterRowID rowID: Int64) throws -> [ADIFRecord] {
+        try records(
+            whereClause: "WHERE id > ? ORDER BY id",
+            bindID: rowID,
+            reserveCapacity: 256
+        )
+    }
+
+    public func maximumRowID() throws -> Int64? {
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
             throw RumlogSQLiteReaderError.missingFile(fileURL.path)
         }
@@ -37,23 +49,17 @@ public struct RumlogSQLiteReader: Sendable {
         defer { sqlite3_close(database) }
         sqlite3_busy_timeout(database, 2_000)
         _ = sqlite3_exec(database, "PRAGMA query_only=ON", nil, nil, nil)
-
-        let sql = "\(Self.recordColumns) FROM logbook ORDER BY id"
         var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
+        guard sqlite3_prepare_v2(database, "SELECT MAX(id) FROM logbook", -1, &statement, nil) == SQLITE_OK,
+              let statement else {
             throw RumlogSQLiteReaderError.queryFailed(String(cString: sqlite3_errmsg(database)))
         }
         defer { sqlite3_finalize(statement) }
-
-        var result: [ADIFRecord] = []
-        result.reserveCapacity(70_000)
-        while sqlite3_step(statement) == SQLITE_ROW {
-            result.append(Self.record(from: statement))
-        }
-        guard sqlite3_errcode(database) == SQLITE_OK || sqlite3_errcode(database) == SQLITE_DONE else {
+        guard sqlite3_step(statement) == SQLITE_ROW else {
             throw RumlogSQLiteReaderError.queryFailed(String(cString: sqlite3_errmsg(database)))
         }
-        return result
+        guard sqlite3_column_type(statement, 0) != SQLITE_NULL else { return nil }
+        return sqlite3_column_int64(statement, 0)
     }
 
     public func count() throws -> Int {
@@ -133,6 +139,44 @@ public struct RumlogSQLiteReader: Sendable {
             throw RumlogSQLiteReaderError.queryFailed(String(cString: sqlite3_errmsg(database)))
         }
         return matches
+    }
+
+    private func records(
+        whereClause: String,
+        bindID: Int64?,
+        reserveCapacity: Int
+    ) throws -> [ADIFRecord] {
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            throw RumlogSQLiteReaderError.missingFile(fileURL.path)
+        }
+        var database: OpaquePointer?
+        let flags = SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX
+        guard sqlite3_open_v2(fileURL.path, &database, flags, nil) == SQLITE_OK, let database else {
+            let message = database.map { String(cString: sqlite3_errmsg($0)) } ?? "unknown SQLite error"
+            if let database { sqlite3_close(database) }
+            throw RumlogSQLiteReaderError.openFailed(message)
+        }
+        defer { sqlite3_close(database) }
+        sqlite3_busy_timeout(database, 2_000)
+        _ = sqlite3_exec(database, "PRAGMA query_only=ON", nil, nil, nil)
+
+        let sql = "\(Self.recordColumns) FROM logbook \(whereClause)"
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
+            throw RumlogSQLiteReaderError.queryFailed(String(cString: sqlite3_errmsg(database)))
+        }
+        defer { sqlite3_finalize(statement) }
+        if let bindID { sqlite3_bind_int64(statement, 1, bindID) }
+
+        var result: [ADIFRecord] = []
+        result.reserveCapacity(reserveCapacity)
+        while sqlite3_step(statement) == SQLITE_ROW {
+            result.append(Self.record(from: statement))
+        }
+        guard sqlite3_errcode(database) == SQLITE_OK || sqlite3_errcode(database) == SQLITE_DONE else {
+            throw RumlogSQLiteReaderError.queryFailed(String(cString: sqlite3_errmsg(database)))
+        }
+        return result
     }
 
     private func record(whereClause: String, bindID: Int64?) throws -> ADIFRecord? {

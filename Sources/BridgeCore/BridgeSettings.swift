@@ -66,23 +66,29 @@ public struct ContinuousSyncState: Codable, Equatable, Sendable {
     public var stationID: Int
     public var lastWavelogID: Int?
     public var lastRumlogScanAt: Date?
+    public var lastRumlogRowID: Int64?
     public var knownFingerprints: Set<String>
     public var lastSuccessAt: Date?
+    public var lastReconciliationAt: Date?
     public var pendingInboundFingerprints: Set<String>?
 
     public init(
         stationID: Int,
         lastWavelogID: Int? = nil,
         lastRumlogScanAt: Date? = nil,
+        lastRumlogRowID: Int64? = nil,
         knownFingerprints: Set<String> = [],
         lastSuccessAt: Date? = nil,
+        lastReconciliationAt: Date? = nil,
         pendingInboundFingerprints: Set<String>? = nil
     ) {
         self.stationID = stationID
         self.lastWavelogID = lastWavelogID
         self.lastRumlogScanAt = lastRumlogScanAt
+        self.lastRumlogRowID = lastRumlogRowID
         self.knownFingerprints = knownFingerprints
         self.lastSuccessAt = lastSuccessAt
+        self.lastReconciliationAt = lastReconciliationAt
         self.pendingInboundFingerprints = pendingInboundFingerprints
     }
 }

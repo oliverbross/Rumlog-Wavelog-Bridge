@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.2.2 — 2026-10-07
+
+Reliability release by Oliver Bross OM0RX.
+
+- Fixes a repeatable crash in edit reconciliation when Wavelog pagination
+  includes the same QSO ID in more than one page.
+- Keeps new-contact synchronization running while the optional RUMlog edit peer
+  is disconnected; edit reconciliation resumes after the peer reconnects.
+- Replaces one-minute complete local-logbook scans with a durable SQLite row-ID
+  checkpoint and a bounded upgrade-recovery window.
+- Runs the first lightweight automatic contact cycle after five seconds, then
+  follows the configured interval.
+- Persists the successful full-reconciliation time and gives startup contact sync
+  a five-minute head start before an overdue full edit scan.
+- Applies a five-minute retry floor after a failed full reconciliation so a
+  transient provider error cannot trigger another expensive inventory every minute.
+- Advertises the edit peer from the active local interface with broadcast, so
+  RUMlog can distinguish the bridge from itself and discovery remains reliable
+  when another local app also uses UDP port 12060. Incoming TCP is accepted only
+  from this Mac's own interface address.
+- Adds regression coverage for repeated Wavelog page rows, legacy state migration,
+  and live read-only incremental SQLite access.
+
 ## 0.2.1 — 2026-10-05
 
 Official project release by Oliver Bross OM0RX.

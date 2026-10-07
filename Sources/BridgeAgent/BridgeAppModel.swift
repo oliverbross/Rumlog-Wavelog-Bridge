@@ -27,9 +27,15 @@ final class BridgeAppModel: ObservableObject {
     private var peerBridge: RumlogPeerBridge?
     private var reconciliationState: ReconciliationState?
     private var lastReconciliationAt: Date?
+    private var lastReconciliationAttemptAt: Date?
     private var lastValidatedLogbookPath: String?
     private var lastLogbookValidationAt: Date?
     private let logbookValidationCacheSeconds: TimeInterval = 300
+    private let reconciliationIntervalSeconds: TimeInterval = 300
+    private let startupReconciliationDelaySeconds: TimeInterval = 300
+    private let automaticInitialDelaySeconds: TimeInterval = 5
+    private let incrementalRecoveryRowCount: Int64 = 1_000
+    private var reconciliationNotBefore = Date.distantPast
 
     init() {
         Task { await load() }
@@ -45,7 +51,7 @@ final class BridgeAppModel: ObservableObject {
 
     var canLiveSync: Bool {
         canConnect && rumlogInstanceCount == 1 && settings.rumlogLogbookPath?.isEmpty == false
-            && bootstrap.completed && rumlogPeerConnected && !isBusy
+            && bootstrap.completed && !isBusy
     }
 
     func load() async {
@@ -57,6 +63,9 @@ final class BridgeAppModel: ObservableObject {
             bootstrap = try await store.loadBootstrapState(stationID: settings.stationID)
             syncState = try await store.loadContinuousSyncState(stationID: settings.stationID)
             reconciliationState = try await store.loadReconciliationState(stationID: settings.stationID)
+            lastReconciliationAt = syncState.lastReconciliationAt ?? reconciliationState?.lastRunAt
+            lastReconciliationAttemptAt = lastReconciliationAt
+            reconciliationNotBefore = Date().addingTimeInterval(startupReconciliationDelaySeconds)
             ledger = try SyncLedger(fileURL: await store.ledgerURL())
             refreshRumlogState()
             startPeerBridge()
@@ -88,7 +97,9 @@ final class BridgeAppModel: ObservableObject {
                         ?? ContinuousSyncState(stationID: selected.id)
                     self.reconciliationState = try await self.fileStore?.loadReconciliationState(stationID: selected.id)
                         ?? ReconciliationState(stationID: selected.id)
-                    self.lastReconciliationAt = nil
+                    self.lastReconciliationAt = self.syncState.lastReconciliationAt
+                        ?? self.reconciliationState?.lastRunAt
+                    self.lastReconciliationAttemptAt = self.lastReconciliationAt
                 }
                 self.status = "Connected"
                 self.detail = "Wavelog API v2 accepted the token and returned \(discovered.count) station profile(s)."
@@ -108,7 +119,8 @@ final class BridgeAppModel: ObservableObject {
                 ?? ContinuousSyncState(stationID: id)
             reconciliationState = (try? await fileStore?.loadReconciliationState(stationID: id))
                 ?? ReconciliationState(stationID: id)
-            lastReconciliationAt = nil
+            lastReconciliationAt = syncState.lastReconciliationAt ?? reconciliationState?.lastRunAt
+            lastReconciliationAttemptAt = lastReconciliationAt
         }
     }
 
@@ -247,10 +259,17 @@ final class BridgeAppModel: ObservableObject {
     func syncNow() {
         Task {
             await perform("Synchronizing contacts and edits…") {
-                let edits = try await self.runFullReconciliation()
                 let result = try await self.runContinuousSync()
-                self.status = "Sync complete"
-                self.detail = "\(result.fromWavelog) new Wavelog rows checked · \(result.toWavelog) new contacts uploaded · \(edits.toRumlog) edits applied to RUMlog · \(edits.toWavelog) edits applied to Wavelog · \(edits.baselined) links baselined · \(edits.conflicts) conflicts · \(edits.deletionsHeld) deletions held"
+                let edits = self.rumlogPeerConnected
+                    ? try await self.runFullReconciliation()
+                    : FullReconciliationResult()
+                self.status = self.rumlogPeerConnected
+                    ? "Sync complete"
+                    : "Contacts synced; edit peer waiting"
+                let peerNote = self.rumlogPeerConnected
+                    ? ""
+                    : " · edit reconciliation deferred until RUMlog peer reconnects"
+                self.detail = "\(result.fromWavelog) new Wavelog rows checked · \(result.toWavelog) new contacts uploaded · \(edits.toRumlog) edits applied to RUMlog · \(edits.toWavelog) edits applied to Wavelog · \(edits.baselined) links baselined · \(edits.conflicts) conflicts · \(edits.deletionsHeld) deletions held\(peerNote)"
             }
         }
     }
@@ -286,9 +305,27 @@ final class BridgeAppModel: ObservableObject {
         var received = 0
         var sent = 0
         let scanStarted = Date()
+        let reader = RumlogSQLiteReader(fileURL: URL(fileURLWithPath: path))
+        let needsInboundRecovery = state.pendingInboundFingerprints != nil
+        let previousRowID = state.lastRumlogRowID
+        let hasPriorBaseline = state.lastRumlogScanAt != nil && !state.knownFingerprints.isEmpty
+        let recoveryRowCount = incrementalRecoveryRowCount
         let localRecords = try await Task.detached {
-            try RumlogSQLiteReader(fileURL: URL(fileURLWithPath: path)).records()
+            if needsInboundRecovery {
+                return try reader.records()
+            }
+            if let previousRowID {
+                if let maximumRowID = try reader.maximumRowID(), previousRowID > maximumRowID {
+                    return try reader.records()
+                }
+                return try reader.records(afterRowID: previousRowID)
+            }
+            if hasPriorBaseline, let maximumRowID = try reader.maximumRowID() {
+                return try reader.records(afterRowID: max(0, maximumRowID - recoveryRowCount))
+            }
+            return try reader.records()
         }.value
+        let highestLocalRowID = localRecords.compactMap(recordRumlogRowID).max()
         let recentLocalFingerprints = Set(localRecords.compactMap(\.semanticIdentityHash))
         var recoveryFingerprints: Set<String> = []
         if state.pendingInboundFingerprints != nil {
@@ -371,6 +408,9 @@ final class BridgeAppModel: ObservableObject {
         }
 
         state.lastRumlogScanAt = scanStarted
+        if let highestLocalRowID {
+            state.lastRumlogRowID = highestLocalRowID
+        }
         state.lastSuccessAt = Date()
         try await fileStore?.saveContinuousSyncState(state)
         syncState = state
@@ -382,22 +422,42 @@ final class BridgeAppModel: ObservableObject {
         automaticTask = nil
         guard settings.automaticSync else { return }
         automaticTask = Task {
+            var isFirstCycle = true
             while !Task.isCancelled {
                 do {
-                    try await Task.sleep(for: .seconds(max(settings.pollIntervalSeconds, 15)))
+                    let configuredDelay = TimeInterval(max(settings.pollIntervalSeconds, 15))
+                    let delay = isFirstCycle
+                        ? min(configuredDelay, automaticInitialDelaySeconds)
+                        : configuredDelay
+                    isFirstCycle = false
+                    try await Task.sleep(for: .seconds(delay))
                 } catch { break }
-                guard !Task.isCancelled, !isBusy, bootstrap.completed, rumlogPeerConnected,
+                guard !Task.isCancelled, !isBusy, bootstrap.completed,
                       settings.rumlogLogbookPath?.isEmpty == false else { continue }
                 await perform("Automatic sync…") {
-                    let shouldReconcile = self.lastReconciliationAt.map {
-                        Date().timeIntervalSince($0) >= 300
-                    } ?? true
-                    let edits = shouldReconcile
-                        ? try await self.runFullReconciliation()
-                        : FullReconciliationResult()
                     let result = try await self.runContinuousSync()
-                    self.status = "Automatic sync complete"
-                    self.detail = "\(result.fromWavelog) new rows checked · \(result.toWavelog) new uploaded · \(edits.toRumlog + edits.toWavelog) edits synchronized"
+                    let now = Date()
+                    let reconciliationReference = [
+                        self.lastReconciliationAttemptAt,
+                        self.lastReconciliationAt,
+                    ].compactMap { $0 }.max()
+                    let shouldReconcile = reconciliationReference.map {
+                        now.timeIntervalSince($0) >= self.reconciliationIntervalSeconds
+                    } ?? true
+                    let canReconcile = self.rumlogPeerConnected
+                        && now >= self.reconciliationNotBefore
+                    var edits = FullReconciliationResult()
+                    if shouldReconcile && canReconcile {
+                        self.lastReconciliationAttemptAt = now
+                        edits = try await self.runFullReconciliation()
+                    }
+                    self.status = self.rumlogPeerConnected
+                        ? "Automatic sync complete"
+                        : "Contacts synced; edit peer waiting"
+                    let peerNote = self.rumlogPeerConnected
+                        ? ""
+                        : " · edit reconciliation deferred until RUMlog peer reconnects"
+                    self.detail = "\(result.fromWavelog) new rows checked · \(result.toWavelog) new uploaded · \(edits.toRumlog + edits.toWavelog) edits synchronized\(peerNote)"
                 }
             }
         }
@@ -509,9 +569,13 @@ final class BridgeAppModel: ObservableObject {
             if !page.meta.hasMore { break }
             pageNumber += 1
         }
+        let uniqueRemoteQSOs = deduplicatedWavelogQSOs(remoteQSOs)
         status = "Indexing contacts for edit reconciliation…"
+        if uniqueRemoteQSOs.count != remoteQSOs.count {
+            detail = "\((remoteQSOs.count - uniqueRemoteQSOs.count).formatted()) repeated page row(s) safely ignored"
+        }
         let index = await Task.detached {
-            ReconciliationIndex(localRecords: localRecords, remoteQSOs: remoteQSOs)
+            ReconciliationIndex(localRecords: localRecords, remoteQSOs: uniqueRemoteQSOs)
         }.value
         let localEntries = index.localEntries
         let localGroups = index.localGroups
@@ -542,13 +606,15 @@ final class BridgeAppModel: ObservableObject {
                 }
                 return links
             }.value
-            state.lastRunAt = Date()
+            let completedAt = Date()
+            state.lastRunAt = completedAt
             try await fileStore?.saveReconciliationState(state)
             reconciliationState = state
-            lastReconciliationAt = Date()
+            lastReconciliationAt = completedAt
             var continuous = try await fileStore?.loadContinuousSyncState(stationID: settings.stationID)
                 ?? ContinuousSyncState(stationID: settings.stationID)
             continuous.knownFingerprints.formUnion(state.links.values.map(\.semanticIdentityHash))
+            continuous.lastReconciliationAt = completedAt
             try await fileStore?.saveContinuousSyncState(continuous)
             syncState = continuous
             result.baselined = state.links.count
@@ -585,15 +651,17 @@ final class BridgeAppModel: ObservableObject {
                 migrated += 1
             }
             state.localSnapshotVersion = RumlogSQLiteReader.snapshotVersion
-            state.lastRunAt = Date()
+            let completedAt = Date()
+            state.lastRunAt = completedAt
             result.baselined += migrated
             result.conflicts += held
             try await fileStore?.saveReconciliationState(state)
             reconciliationState = state
-            lastReconciliationAt = Date()
+            lastReconciliationAt = completedAt
             var continuous = try await fileStore?.loadContinuousSyncState(stationID: settings.stationID)
                 ?? ContinuousSyncState(stationID: settings.stationID)
             continuous.knownFingerprints.formUnion(state.links.values.map(\.semanticIdentityHash))
+            continuous.lastReconciliationAt = completedAt
             try await fileStore?.saveContinuousSyncState(continuous)
             syncState = continuous
             return result
@@ -715,15 +783,17 @@ final class BridgeAppModel: ObservableObject {
             stateDirty = true
             result.baselined += 1
         }
+        let completedAt = Date()
         if stateDirty {
-            state.lastRunAt = Date()
+            state.lastRunAt = completedAt
             try await fileStore?.saveReconciliationState(state)
         }
         reconciliationState = state
-        lastReconciliationAt = Date()
+        lastReconciliationAt = completedAt
         var continuous = try await fileStore?.loadContinuousSyncState(stationID: settings.stationID)
             ?? ContinuousSyncState(stationID: settings.stationID)
         continuous.knownFingerprints.formUnion(state.links.values.map(\.semanticIdentityHash))
+        continuous.lastReconciliationAt = completedAt
         try await fileStore?.saveContinuousSyncState(continuous)
         syncState = continuous
         return result
@@ -852,8 +922,13 @@ private struct ReconciliationIndex: Sendable {
         }
         self.localEntries = localEntries
         localGroups = Dictionary(grouping: localEntries, by: \.semanticIdentityHash)
-        remoteByID = Dictionary(uniqueKeysWithValues: remoteEntries.map { ($0.qso.id, $0) })
-        remoteGroups = Dictionary(grouping: remoteEntries, by: \.semanticIdentityHash)
+        var uniqueRemoteEntries: [Int: RemoteReconciliationEntry] = [:]
+        uniqueRemoteEntries.reserveCapacity(remoteEntries.count)
+        for entry in remoteEntries {
+            uniqueRemoteEntries[entry.qso.id] = entry
+        }
+        remoteByID = uniqueRemoteEntries
+        remoteGroups = Dictionary(grouping: Array(uniqueRemoteEntries.values), by: \.semanticIdentityHash)
     }
 }
 

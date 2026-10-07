@@ -394,6 +394,15 @@ public struct ReconciliationState: Codable, Equatable, Sendable {
     }
 }
 
+public func deduplicatedWavelogQSOs(_ qsos: [WavelogQSO]) -> [WavelogQSO] {
+    var byID: [Int: WavelogQSO] = [:]
+    byID.reserveCapacity(qsos.count)
+    for qso in qsos {
+        byID[qso.id] = qso
+    }
+    return byID.values.sorted { $0.id < $1.id }
+}
+
 private func normalized(_ value: String?, uppercased: Bool = false) -> String {
     let result = (value ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
     return uppercased ? result.uppercased() : result

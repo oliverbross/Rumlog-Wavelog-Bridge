@@ -135,7 +135,7 @@ struct ContentView: View {
                         .disabled(model.isBusy)
                 }
             }
-            Text("\(model.rumlogPeerStatus). The selected .rlog file is read through SQLite’s read-only mode for fast change detection. Writes use only RUMlog’s Apple event and peer interfaces. Enable ‘Listen to other RUMlog instances’ on this port, then tick Import for Wavelog Bridge in Window → Network.")
+            Text("\(model.rumlogPeerStatus). New contacts continue through the read-only logbook and Apple event interfaces while the peer is waiting; edit reconciliation resumes after reconnect. Enable ‘Listen to other RUMlog instances’ on this port, then tick Import for Wavelog Bridge in Window → Network.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .padding(.top, 8)
@@ -217,7 +217,7 @@ struct ContentView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                Text("New contacts synchronize on every cycle. A complete reconciliation checks edits at least every five minutes and whenever you press Sync; conflicting two-sided edits and deletions are held rather than guessed.")
+                Text("New contacts synchronize on every cycle without rescanning the complete local logbook. While the RUMlog peer is connected, a complete reconciliation checks edits at least every five minutes after the startup grace period and whenever you press Sync; conflicting two-sided edits and deletions are held rather than guessed.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

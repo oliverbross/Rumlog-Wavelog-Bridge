@@ -22,6 +22,8 @@ public final class RumlogPeerBridge: @unchecked Sendable {
     public typealias StateHandler = @Sendable (Bool, String) -> Void
 
     private let port: UInt16
+    private let peerAddress: String
+    private let advertisementHosts: [String]
     private let stationName: String
     private let logName: String
     private let stateHandler: StateHandler?
@@ -30,12 +32,17 @@ public final class RumlogPeerBridge: @unchecked Sendable {
     private let lock = NSLock()
     private let writeLock = NSLock()
     private var advertiser: DispatchSourceTimer?
+    private var advertiserSocket: Int32 = -1
     private var listenerSocket: Int32 = -1
     private var connectionSocket: Int32 = -1
     private var running = false
 
     public init(port: UInt16, stationName: String = "Wavelog Bridge", logName: String, stateHandler: StateHandler? = nil) {
+        let network = Self.primaryIPv4Interface()
         self.port = port
+        self.peerAddress = network?.address ?? "127.0.0.1"
+        self.advertisementHosts = network.map { [$0.broadcast, "255.255.255.255"] }
+            ?? ["127.0.0.1", "127.255.255.255"]
         self.stationName = stationName
         self.logName = logName
         self.stateHandler = stateHandler
@@ -58,13 +65,14 @@ public final class RumlogPeerBridge: @unchecked Sendable {
         guard socketFD >= 0 else { throw socketError("create") }
         var reuse: Int32 = 1
         setsockopt(socketFD, SOL_SOCKET, SO_REUSEADDR, &reuse, socklen_t(MemoryLayout.size(ofValue: reuse)))
+        setsockopt(socketFD, SOL_SOCKET, SO_REUSEPORT, &reuse, socklen_t(MemoryLayout.size(ofValue: reuse)))
         var noSigPipe: Int32 = 1
         setsockopt(socketFD, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, socklen_t(MemoryLayout.size(ofValue: noSigPipe)))
         var address = sockaddr_in()
         address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
         address.sin_family = sa_family_t(AF_INET)
         address.sin_port = port.bigEndian
-        address.sin_addr = in_addr(s_addr: inet_addr("127.0.0.1"))
+        address.sin_addr = in_addr(s_addr: inet_addr(peerAddress))
         let bindResult = withUnsafePointer(to: &address) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
                 Darwin.bind(socketFD, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
@@ -72,17 +80,40 @@ public final class RumlogPeerBridge: @unchecked Sendable {
         }
         guard bindResult == 0 else {
             Darwin.close(socketFD)
-            throw socketError("bind 127.0.0.1:\(port)")
+            throw socketError("bind \(peerAddress):\(port)")
         }
         guard Darwin.listen(socketFD, 4) == 0 else {
             Darwin.close(socketFD)
             throw socketError("listen")
         }
+        let udpSocket = socket(AF_INET, SOCK_DGRAM, 0)
+        guard udpSocket >= 0 else {
+            Darwin.close(socketFD)
+            throw socketError("create advertiser")
+        }
+        var broadcast: Int32 = 1
+        setsockopt(udpSocket, SOL_SOCKET, SO_BROADCAST, &broadcast, socklen_t(MemoryLayout.size(ofValue: broadcast)))
+        var advertisementSource = sockaddr_in()
+        advertisementSource.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        advertisementSource.sin_family = sa_family_t(AF_INET)
+        advertisementSource.sin_port = 0
+        advertisementSource.sin_addr = in_addr(s_addr: inet_addr(peerAddress))
+        let advertisementBindResult = withUnsafePointer(to: &advertisementSource) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                Darwin.bind(udpSocket, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        guard advertisementBindResult == 0 else {
+            Darwin.close(udpSocket)
+            Darwin.close(socketFD)
+            throw socketError("bind advertiser \(peerAddress)")
+        }
         listenerSocket = socketFD
+        advertiserSocket = udpSocket
         lock.lock()
         running = true
         lock.unlock()
-        stateHandler?(false, "Advertising Wavelog Bridge on port \(port)")
+        stateHandler?(false, "Advertising Wavelog Bridge from \(peerAddress):\(port)")
         let timer = DispatchSource.makeTimerSource(queue: advertiserQueue)
         timer.schedule(deadline: .now(), repeating: .seconds(7))
         timer.setEventHandler { [weak self] in self?.advertise() }
@@ -100,8 +131,11 @@ public final class RumlogPeerBridge: @unchecked Sendable {
         connectionSocket = -1
         let listener = listenerSocket
         listenerSocket = -1
+        let advertisement = advertiserSocket
+        advertiserSocket = -1
         lock.unlock()
         if peer >= 0 { Darwin.shutdown(peer, SHUT_RDWR) }
+        if advertisement >= 0 { Darwin.close(advertisement) }
         if listener >= 0 {
             Darwin.shutdown(listener, SHUT_RDWR)
             Darwin.close(listener)
@@ -129,6 +163,10 @@ public final class RumlogPeerBridge: @unchecked Sendable {
             }
             if accepted < 0 {
                 if isRunning { stateHandler?(false, "RUMlog peer accept failed") }
+                continue
+            }
+            guard Self.ipv4String(address.sin_addr) == peerAddress else {
+                Darwin.close(accepted)
                 continue
             }
             var noSigPipe: Int32 = 1
@@ -170,7 +208,7 @@ public final class RumlogPeerBridge: @unchecked Sendable {
         <?xml version="1.0" encoding="UTF-8"?>
         <AppInfo>
             <Application>RUMlogNG</Application>
-            <AppVersion>RUMlog-Wavelog Bridge 0.2.1</AppVersion>
+            <AppVersion>RUMlogNG 6.5.1</AppVersion>
             <StationName>\(xmlEscaped(stationName))</StationName>
             <dbname>\(xmlEscaped(logName))</dbname>
             <ShownDxcc></ShownDxcc>
@@ -180,22 +218,63 @@ public final class RumlogPeerBridge: @unchecked Sendable {
             <CurrentBand></CurrentBand>
         </AppInfo>
         """
-        let socketFD = socket(AF_INET, SOCK_DGRAM, 0)
+        lock.lock()
+        let socketFD = advertiserSocket
+        lock.unlock()
         guard socketFD >= 0 else { return }
-        defer { Darwin.close(socketFD) }
-        var address = sockaddr_in()
-        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
-        address.sin_family = sa_family_t(AF_INET)
-        address.sin_port = port.bigEndian
-        address.sin_addr = in_addr(s_addr: inet_addr("127.0.0.1"))
         let data = Data(xml.utf8)
-        data.withUnsafeBytes { bytes in
-            withUnsafePointer(to: &address) {
-                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                    _ = Darwin.sendto(socketFD, bytes.baseAddress, data.count, 0, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+        // Multiple local applications can legitimately listen on RUMlog's UDP
+        // port. Broadcast reaches every listener, while a source address bound
+        // to the active interface lets RUMlog distinguish this process from
+        // itself. The TCP accept path still rejects non-local connections.
+        for host in advertisementHosts {
+            var address = sockaddr_in()
+            address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+            address.sin_family = sa_family_t(AF_INET)
+            address.sin_port = port.bigEndian
+            address.sin_addr = in_addr(s_addr: inet_addr(host))
+            data.withUnsafeBytes { bytes in
+                withUnsafePointer(to: &address) {
+                    $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                        _ = Darwin.sendto(socketFD, bytes.baseAddress, data.count, 0, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+                    }
                 }
             }
         }
+    }
+
+    private static func primaryIPv4Interface() -> (address: String, broadcast: String)? {
+        var interfaces: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&interfaces) == 0, let first = interfaces else { return nil }
+        defer { freeifaddrs(first) }
+        var candidates: [(name: String, address: String, broadcast: String)] = []
+        var cursor: UnsafeMutablePointer<ifaddrs>? = first
+        while let current = cursor {
+            let interface = current.pointee
+            cursor = interface.ifa_next
+            guard let socketAddress = interface.ifa_addr,
+                  socketAddress.pointee.sa_family == UInt8(AF_INET),
+                  interface.ifa_flags & UInt32(IFF_UP) != 0,
+                  interface.ifa_flags & UInt32(IFF_LOOPBACK) == 0,
+                  let netmaskAddress = interface.ifa_netmask
+            else { continue }
+            let address = UnsafeRawPointer(socketAddress).assumingMemoryBound(to: sockaddr_in.self).pointee.sin_addr
+            let netmask = UnsafeRawPointer(netmaskAddress).assumingMemoryBound(to: sockaddr_in.self).pointee.sin_addr
+            let broadcast = in_addr(s_addr: address.s_addr | ~netmask.s_addr)
+            guard let addressText = ipv4String(address), let broadcastText = ipv4String(broadcast) else { continue }
+            candidates.append((String(cString: interface.ifa_name), addressText, broadcastText))
+        }
+        let selected = candidates.first(where: { $0.name == "en0" })
+            ?? candidates.first(where: { $0.name.hasPrefix("en") })
+            ?? candidates.first
+        return selected.map { ($0.address, $0.broadcast) }
+    }
+
+    private static func ipv4String(_ address: in_addr) -> String? {
+        var address = address
+        var buffer = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
+        guard inet_ntop(AF_INET, &address, &buffer, socklen_t(buffer.count)) != nil else { return nil }
+        return String(decoding: buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
     }
 
     private func send(_ data: Data) throws {
@@ -235,7 +314,7 @@ enum RumlogPeerWire {
         return Data("""
         <?xml version="1.0" encoding="UTF-8"?>
         <RUMlogNG>
-            <AppVersion>RUMlog-Wavelog Bridge 0.2.1</AppVersion>
+            <AppVersion>RUMlog-Wavelog Bridge 0.2.2</AppVersion>
             <StationName>\(xmlEscaped(stationName))</StationName>
             <\(kind)>
                 <QSO_Data>\(encoded)</QSO_Data>

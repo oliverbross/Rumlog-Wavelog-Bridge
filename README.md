@@ -27,9 +27,14 @@ the `.rlog` database directly.
 - Proven native RUMlog peer transport for applying remote edits without direct
   `.rlog` writes: `QsoDeleted` followed by `QsoLogged` over the RUMlog TCP peer
   stream.
-- Fast full-logbook scans through SQLite `READONLY` plus `PRAGMA query_only=ON`;
-  the bridge never opens the operator logbook for writing.
+- Fast row-ID-checkpointed new-contact scans through SQLite `READONLY` plus
+  `PRAGMA query_only=ON`; the complete local logbook is read only for edit
+  reconciliation or bounded crash recovery.
 - Five-minute automatic full reconciliation plus an on-demand sync action.
+- New-contact sync continues when the RUMlog edit peer is waiting; edit
+  reconciliation resumes automatically after the peer reconnects.
+- Duplicate Wavelog rows encountered across moving pagination windows are safely
+  collapsed by provider ID instead of terminating the app.
 - Ambiguous concurrent edits and deletions are held and reported rather than
   guessed.
 - Durable semantic-identity ledger and ambiguity-safe Wavelog outbox.
@@ -47,9 +52,9 @@ the `.rlog` database directly.
 
 ## Install the signed release
 
-1. Download `RUMlog-Wavelog-Bridge-0.2.1-macOS.zip` from the GitHub release.
+1. Download `RUMlog-Wavelog-Bridge-0.2.2-macOS.zip` from the GitHub release.
 2. Expand it and move `RUMlog-Wavelog-Bridge.app` to `/Applications`.
-3. Open the app. Version 0.2.1 is signed with Oliver Bross OM0RX's Apple
+3. Open the app. Version 0.2.2 is signed with Oliver Bross OM0RX's Apple
    Developer ID.
    It is not notarized yet, so if macOS blocks the first launch, Control-click
    the app in Finder, choose **Open**, and confirm **Open** once.
@@ -69,7 +74,12 @@ The application is macOS-only and requires macOS 13 or newer.
    the selected file is visible through the running RUMlog instance.
 3. In RUMlog Preferences → UDP, enable **Listen to other RUMlog instances** on
    the same port. In Window → Network, tick **Import** for **Wavelog Bridge**.
-   The bridge must show **Peer connected**.
+   **Peer connected** is required for Wavelog-originated edits to reach RUMlog;
+   new contacts continue synchronizing while the peer is waiting. The bridge
+   announces itself by broadcast from the Mac's active local interface so RUMlog
+   can distinguish it from itself and discovery still works when another
+   application shares UDP port `12060`. Its peer listener rejects connections
+   that do not originate from this same Mac.
 4. Choose **Start Bootstrap** once. It imports only Wavelog contacts that are
    not already present according to the semantic QSO identity and checkpoints
    every page so it can resume after interruption.
@@ -77,9 +87,13 @@ The application is macOS-only and requires macOS 13 or newer.
    After a successful manual cycle, enable **Automatic** and select the desired
    interval.
 
-New contacts are checked each cycle. Existing-contact edits are checked on every
-manual sync and at least every five minutes during automatic operation. Every
-edit is read back from the destination before the reconciliation baseline moves.
+New contacts are checked each cycle using a durable local row-ID high-water mark
+and Wavelog's new-QSO cursor. The first automatic contact check starts after five
+seconds; subsequent checks use the selected interval. Existing-contact edits are
+checked on every manual sync and at least every five minutes while the peer is
+connected, with a five-minute startup grace period so a full inventory does not
+block initial contact synchronization. Every edit is read back from the
+destination before the reconciliation baseline moves.
 If both sides changed, the record is reported as a conflict and left untouched.
 Deletes and provider-only fields are held rather than guessed.
 

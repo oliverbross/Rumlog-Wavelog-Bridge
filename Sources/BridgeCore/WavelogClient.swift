@@ -558,7 +558,7 @@ public actor WavelogClient {
         request.setValue("Bearer \(configuration.token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
-        request.setValue("Rumlog-Wavelog-Bridge/0.2.1", forHTTPHeaderField: "User-Agent")
+        request.setValue("Rumlog-Wavelog-Bridge/0.2.2", forHTTPHeaderField: "User-Agent")
         if body != nil {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         }
