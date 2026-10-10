@@ -21,7 +21,7 @@ struct ContentView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 5) {
-            Text("RUMlog–Wavelog Bridge")
+            Text("OM0RX-xBridge")
                 .font(.system(size: 28, weight: .semibold))
             Text("A local, restart-safe bridge for your macOS logbook.")
                 .foregroundStyle(.secondary)

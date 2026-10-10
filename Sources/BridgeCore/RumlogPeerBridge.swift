@@ -314,7 +314,7 @@ enum RumlogPeerWire {
         return Data("""
         <?xml version="1.0" encoding="UTF-8"?>
         <RUMlogNG>
-            <AppVersion>RUMlog-Wavelog Bridge 0.2.2</AppVersion>
+            <AppVersion>OM0RX-xBridge 0.3.0</AppVersion>
             <StationName>\(xmlEscaped(stationName))</StationName>
             <\(kind)>
                 <QSO_Data>\(encoded)</QSO_Data>

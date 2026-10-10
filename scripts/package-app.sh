@@ -2,10 +2,10 @@
 set -euo pipefail
 
 repo_dir="${0:A:h:h}"
-app_dir="$repo_dir/dist/RUMlog-Wavelog-Bridge.app"
+app_dir="$repo_dir/dist/OM0RX-xBridge.app"
 contents_dir="$app_dir/Contents"
 
-if [[ "$app_dir" != "$repo_dir/dist/RUMlog-Wavelog-Bridge.app" ]]; then
+if [[ "$app_dir" != "$repo_dir/dist/OM0RX-xBridge.app" ]]; then
     print -u2 "Refusing unexpected app output path: $app_dir"
     exit 1
 fi
@@ -15,10 +15,10 @@ bin_dir="$(swift build --package-path "$repo_dir" -c release --show-bin-path)"
 
 rm -rf "$app_dir"
 mkdir -p "$contents_dir/MacOS" "$contents_dir/Resources"
-cp "$bin_dir/rumlog-wavelog-bridge" "$contents_dir/MacOS/rumlog-wavelog-bridge"
+cp "$bin_dir/om0rx-xbridge" "$contents_dir/MacOS/om0rx-xbridge"
 cp "$repo_dir/Resources/Info.plist" "$contents_dir/Info.plist"
 cp "$repo_dir/Resources/AppIcon.icns" "$contents_dir/Resources/AppIcon.icns"
-chmod 755 "$contents_dir/MacOS/rumlog-wavelog-bridge"
+chmod 755 "$contents_dir/MacOS/om0rx-xbridge"
 signing_identity="${CODE_SIGN_IDENTITY:-}"
 if [[ -z "$signing_identity" ]]; then
     identity_output="$(security find-identity -v -p codesigning 2>/dev/null || true)"

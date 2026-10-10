@@ -3,14 +3,14 @@
 import PackageDescription
 
 let package = Package(
-    name: "RumlogWavelogBridge",
+    name: "OM0RXXBridge",
     platforms: [
         .macOS(.v13),
     ],
     products: [
         .library(name: "BridgeCore", targets: ["BridgeCore"]),
         .executable(name: "rumlog-probe", targets: ["RumlogProbe"]),
-        .executable(name: "rumlog-wavelog-bridge", targets: ["BridgeAgent"]),
+        .executable(name: "om0rx-xbridge", targets: ["BridgeAgent"]),
         .executable(name: "bridge-bootstrap", targets: ["BridgeBootstrap"]),
         .executable(name: "bridge-audit", targets: ["BridgeAudit"]),
         .executable(name: "bridge-repair", targets: ["BridgeRepair"]),

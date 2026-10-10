@@ -1,6 +1,6 @@
-# RUMlog–Wavelog Bridge
+# OM0RX-xBridge
 
-[![Latest release](https://img.shields.io/github/v/release/oliverbross/Rumlog-Wavelog-Bridge)](https://github.com/oliverbross/Rumlog-Wavelog-Bridge/releases/latest)
+[![Latest release](https://img.shields.io/github/v/release/oliverbross/OM0RX-xBridge)](https://github.com/oliverbross/OM0RX-xBridge/releases/latest)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 ![macOS 13+](https://img.shields.io/badge/macOS-13%2B-black)
 
@@ -11,7 +11,7 @@ uses RUMlogNG's Apple-event ADIF interface for new-contact imports, and uses the
 native RUMlog-to-RUMlog peer stream for remote edits. The bridge never modifies
 the `.rlog` database directly.
 
-![RUMlog–Wavelog Bridge synchronizing a live logbook](docs/images/app-overview.png)
+![OM0RX-xBridge synchronizing a live logbook](docs/images/app-overview.png)
 
 ## Current status
 
@@ -52,9 +52,9 @@ the `.rlog` database directly.
 
 ## Install the signed release
 
-1. Download `RUMlog-Wavelog-Bridge-0.2.2-macOS.zip` from the GitHub release.
-2. Expand it and move `RUMlog-Wavelog-Bridge.app` to `/Applications`.
-3. Open the app. Version 0.2.2 is signed with Oliver Bross OM0RX's Apple
+1. Download the current `OM0RX-xBridge` macOS build from the GitHub release.
+2. Expand it and move `OM0RX-xBridge.app` to `/Applications`.
+3. Open the app. Version 0.3.0 is signed with Oliver Bross OM0RX's Apple
    Developer ID.
    It is not notarized yet, so if macOS blocks the first launch, Control-click
    the app in Finder, choose **Open**, and confirm **Open** once.
@@ -105,7 +105,7 @@ swift test
 ./scripts/package-app.sh
 ```
 
-The packaged app is written to `dist/RUMlog-Wavelog-Bridge.app`. Packaging uses
+The packaged app is written to `dist/OM0RX-xBridge.app`. Packaging uses
 the first available `Developer ID Application` identity unless
 `CODE_SIGN_IDENTITY` is set explicitly. Without one it produces an ad-hoc signed
 development build.

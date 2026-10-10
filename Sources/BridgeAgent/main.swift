@@ -1,11 +1,11 @@
 import SwiftUI
 
 @main
-struct RumlogWavelogBridgeApp: App {
+struct OM0RXXBridgeApp: App {
     @StateObject private var model = BridgeAppModel()
 
     var body: some Scene {
-        WindowGroup("RUMlog–Wavelog Bridge") {
+        WindowGroup("OM0RX-xBridge") {
             ContentView(model: model)
                 .frame(minWidth: 760, minHeight: 620)
         }

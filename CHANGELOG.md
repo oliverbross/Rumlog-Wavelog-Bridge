@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.0 — 2026-10-11
+
+Branding release by Oliver Bross OM0RX.
+
+- Renames the native application, package, executable, and repository to
+  **OM0RX-xBridge** so it sits alongside OM0RX-xCat and OM0RX-xCluster.
+- Preserves the existing bundle identifier, Keychain service, and Application
+  Support directory so upgrades retain credentials, macOS permissions, and
+  restart-safe synchronization state.
+- Rebuilds the Developer ID signed macOS app as version 0.3.0 (build 12).
+
 ## 0.2.2 — 2026-10-07
 
 Reliability release by Oliver Bross OM0RX.
