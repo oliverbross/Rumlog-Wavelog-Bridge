@@ -17,6 +17,7 @@ rm -rf "$app_dir"
 mkdir -p "$contents_dir/MacOS" "$contents_dir/Resources"
 cp "$bin_dir/rumlog-wavelog-bridge" "$contents_dir/MacOS/rumlog-wavelog-bridge"
 cp "$repo_dir/Resources/Info.plist" "$contents_dir/Info.plist"
+cp "$repo_dir/Resources/AppIcon.icns" "$contents_dir/Resources/AppIcon.icns"
 chmod 755 "$contents_dir/MacOS/rumlog-wavelog-bridge"
 signing_identity="${CODE_SIGN_IDENTITY:-}"
 if [[ -z "$signing_identity" ]]; then
